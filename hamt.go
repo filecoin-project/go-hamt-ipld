@@ -8,7 +8,7 @@ import (
 
 type Node struct {
 	Bitfield *big.Int
-	Pointers []*Pointer
+	Pointers []interface{}
 }
 
 func NewNode() *Node {
@@ -119,19 +119,30 @@ func (n *Node) modifyValue(hv []byte, depth int, k string, v interface{}) error 
 			if v == nil {
 				return ErrNotFound
 			}
-			// TODO: 'pair' optimization
-
-			splnode := NewNode()
-
-			splnode.modifyValue(hv, depth+1, k, v)
-			ohv := hash(child.Key)
-			splnode.modifyValue(ohv, depth+1, child.Key, child.Obj.(string))
-
-			n.setChild(cindex, &Pointer{Prefix: &cindex, Obj: splnode})
+			p2 := &Pointer{Key: k, Obj: v}
+			n.setChild(cindex, []*Pointer{child, p2})
 			return nil
 		}
 	case []*Pointer:
-		panic("not yet handled")
+		if v == nil {
+			for i, p := range child {
+				if p.Key == k {
+					_ = i
+					panic("NYI")
+				}
+			}
+			return ErrNotFound
+		}
+
+		np := &Pointer{Key: k, Obj: v}
+		for i := 0; i < len(child); i++ {
+			if k < child[i].Key {
+				child = append(child[:i], append([]*Pointer{np}, child[i:]...)...)
+				return nil
+			}
+		}
+		child = append(child, np)
+		return nil
 	default:
 		panic("no")
 	}
@@ -147,11 +158,11 @@ func (n *Node) insertChild(idx int, k string, v interface{}) error {
 
 	p := &Pointer{Key: k, Obj: v}
 
-	n.Pointers = append(n.Pointers[:i], append([]*Pointer{p}, n.Pointers[i:]...)...)
+	n.Pointers = append(n.Pointers[:i], append([]interface{}{p}, n.Pointers[i:]...)...)
 	return nil
 }
 
-func (n *Node) setChild(i byte, p *Pointer) {
+func (n *Node) setChild(i byte, p interface{}) {
 	n.Pointers[i] = p
 }
 

@@ -15,22 +15,27 @@ func randString() string {
 
 func verifyStructure(n *Node) error {
 	for _, p := range n.Pointers {
-		switch ch := p.Obj.(type) {
-		case string:
-			continue
-		case *Node:
-			switch len(ch.Pointers) {
-			case 0:
-				return fmt.Errorf("node has child with no children")
-			case 1:
-				return fmt.Errorf("node has child with only a single child")
-			default:
-				if err := verifyStructure(ch); err != nil {
-					return err
+		switch p := p.(type) {
+		case *Pointer:
+			switch ch := p.Obj.(type) {
+			case string:
+				continue
+			case *Node:
+				switch len(ch.Pointers) {
+				case 0:
+					return fmt.Errorf("node has child with no children")
+				case 1:
+					return fmt.Errorf("node has child with only a single child")
+				default:
+					if err := verifyStructure(ch); err != nil {
+						return err
+					}
 				}
+			default:
+				panic("wrong type")
 			}
-		default:
-			panic("wrong type")
+		case []*Pointer:
+			panic("NYI")
 		}
 	}
 	return nil
@@ -48,8 +53,13 @@ func dotGraphRec(n *Node, name *int) {
 	for _, p := range n.Pointers {
 		*name++
 		fmt.Printf("\tn%d -> n%d;\n", cur, *name)
-		if ch, ok := p.Obj.(*Node); ok {
-			dotGraphRec(ch, name)
+		switch p := p.(type) {
+		case *Pointer:
+			if ch, ok := p.Obj.(*Node); ok {
+				dotGraphRec(ch, name)
+			}
+		case []*Pointer:
+			panic("NYI")
 		}
 	}
 }
