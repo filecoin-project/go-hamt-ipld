@@ -87,11 +87,25 @@ func (n *Node) modifyValue(hv []byte, depth int, k string, v interface{}) error 
 
 	cindex := byte(n.indexForBitPos(idx))
 
-	child := n.getChild(cindex)
-	switch child := child.(type) {
+	switch child := n.getChild(cindex).(type) {
 	case *Pointer:
 		if child.Prefix != nil {
-			return child.Obj.(*Node).modifyValue(hv, depth+1, k, v)
+			chnd := child.Obj.(*Node)
+			if err := chnd.modifyValue(hv, depth+1, k, v); err != nil {
+				return err
+			}
+
+			// CHAMP optimization, ensure trees look correct after deletions
+			if v == nil {
+				switch len(chnd.Pointers) {
+				case 0:
+					return fmt.Errorf("incorrectly formed HAMT")
+				case 1:
+					n.setChild(cindex, chnd.Pointers[0])
+					return nil
+				}
+			}
+			return nil
 		}
 
 		if child.Key == k {

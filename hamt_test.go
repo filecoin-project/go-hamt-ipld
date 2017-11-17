@@ -2,6 +2,7 @@ package hamt
 
 import (
 	"encoding/hex"
+	"fmt"
 	"math/rand"
 	"testing"
 )
@@ -12,12 +13,52 @@ func randString() string {
 	return hex.EncodeToString(buf)
 }
 
+func verifyStructure(n *Node) error {
+	for _, p := range n.Pointers {
+		switch ch := p.Obj.(type) {
+		case string:
+			continue
+		case *Node:
+			switch len(ch.Pointers) {
+			case 0:
+				return fmt.Errorf("node has child with no children")
+			case 1:
+				return fmt.Errorf("node has child with only a single child")
+			default:
+				if err := verifyStructure(ch); err != nil {
+					return err
+				}
+			}
+		default:
+			panic("wrong type")
+		}
+	}
+	return nil
+}
+
+func dotGraph(n *Node) {
+	fmt.Println("digraph foo {")
+	name := 0
+	dotGraphRec(n, &name)
+	fmt.Println("}")
+}
+
+func dotGraphRec(n *Node, name *int) {
+	cur := *name
+	for _, p := range n.Pointers {
+		*name++
+		fmt.Printf("\tn%d -> n%d;\n", cur, *name)
+		if ch, ok := p.Obj.(*Node); ok {
+			dotGraphRec(ch, name)
+		}
+	}
+}
+
 func TestSetGet(t *testing.T) {
 	vals := make(map[string]string)
-	for i := 0; i < 10000; i++ {
+	for i := 0; i < 200; i++ {
 		vals[randString()] = randString()
 	}
-
 	n := NewNode()
 	for k, v := range vals {
 		n.Set(k, v)
