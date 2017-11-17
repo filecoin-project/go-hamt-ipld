@@ -6,20 +6,21 @@ import (
 	"math/big"
 )
 
-var ErrNotFound = fmt.Errorf("not found")
-
 type Node struct {
 	Bitfield *big.Int
 	Pointers []*Pointer
 }
 
 func NewNode() *Node {
-	return &Node{Bitfield: big.NewInt(0)}
+	return &Node{
+		Bitfield: big.NewInt(0),
+	}
 }
 
 type Pointer struct {
-	Key *string
-	Obj interface{}
+	Prefix *byte
+	Key    string
+	Obj    interface{}
 }
 
 func hash(k string) []byte {
@@ -27,74 +28,130 @@ func hash(k string) []byte {
 	return s[:]
 }
 
-func (n *Node) Find(k string) (string, bool) {
-	return n.getValue(hash(k), 0, k)
+func (n *Node) Find(k string) (string, error) {
+	var out string
+	err := n.getValue(hash(k), 0, k, func(p *Pointer) error {
+		out = p.Obj.(string)
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return out, nil
 }
 
-func (n *Node) getValue(hv []byte, depth int, k string) (string, bool) {
+func (n *Node) Delete(k string) error {
+	return n.modifyValue(hash(k), 0, k, nil)
+}
+
+var ErrNotFound = fmt.Errorf("not found")
+
+func (n *Node) getValue(hv []byte, depth int, k string, cb func(*Pointer) error) error {
 	idx := hv[depth]
 	if n.Bitfield.Bit(int(idx)) == 0 {
-		return "", false
+		return ErrNotFound
 	}
 
 	cindex := byte(n.indexForBitPos(int(idx)))
 
-	child := n.Pointers[cindex]
-	if child.Key == nil {
-		return child.Obj.(*Node).getValue(hv, depth+1, k)
-	}
+	child := n.getChild(cindex)
 
-	if *child.Key == k {
-		return child.Obj.(string), true
-	}
+	switch child := child.(type) {
+	case *Pointer:
+		if child.Prefix != nil {
+			return child.Obj.(*Node).getValue(hv, depth+1, k, cb)
+		}
 
-	return "", false
+		if child.Key == k {
+			return cb(child)
+		}
+
+		return ErrNotFound
+	case []*Pointer:
+		panic("NYI")
+	default:
+		panic("invariant invalidated")
+	}
 }
 
-func (n *Node) Set(k string, v string) {
-	n.modifyValue(hash(k), 0, k, v)
+func (n *Node) Set(k string, v string) error {
+	return n.modifyValue(hash(k), 0, k, v)
 }
 
-func (n *Node) modifyValue(hv []byte, depth int, k, v string) {
+func (n *Node) modifyValue(hv []byte, depth int, k string, v interface{}) error {
 	idx := int(hv[depth])
 
 	if n.Bitfield.Bit(idx) != 1 {
-		n.insertChild(idx, k, v)
-		return
+		return n.insertChild(idx, k, v)
 	}
 
 	cindex := byte(n.indexForBitPos(idx))
 
-	child := n.Pointers[cindex]
-	if child.Key == nil {
-		chnd := child.Obj.(*Node)
-		chnd.modifyValue(hv, depth+1, k, v)
-		return
-	}
+	child := n.getChild(cindex)
+	switch child := child.(type) {
+	case *Pointer:
+		if child.Prefix != nil {
+			return child.Obj.(*Node).modifyValue(hv, depth+1, k, v)
+		}
 
-	switch {
-	case *child.Key == k:
-		child.Obj = v
+		if child.Key == k {
+			if v == nil {
+				n.Bitfield.SetBit(n.Bitfield, idx, 0)
+				return n.rmChild(cindex)
+			}
+			child.Obj = v
+			return nil
+		} else {
+			if v == nil {
+				return ErrNotFound
+			}
+			// TODO: 'pair' optimization
+
+			splnode := NewNode()
+
+			splnode.modifyValue(hv, depth+1, k, v)
+			ohv := hash(child.Key)
+			splnode.modifyValue(ohv, depth+1, child.Key, child.Obj.(string))
+
+			n.setChild(cindex, &Pointer{Prefix: &cindex, Obj: splnode})
+			return nil
+		}
+	case []*Pointer:
+		panic("not yet handled")
 	default:
-		splnode := NewNode()
-
-		splnode.modifyValue(hv, depth+1, k, v)
-		ohv := hash(*child.Key)
-		splnode.modifyValue(ohv, depth+1, *child.Key, child.Obj.(string))
-
-		n.setChild(cindex, &Pointer{Obj: splnode})
+		panic("no")
 	}
 }
 
-func (n *Node) insertChild(idx int, k, v string) {
+func (n *Node) insertChild(idx int, k string, v interface{}) error {
+	if v == nil {
+		return ErrNotFound
+	}
+
 	i := n.indexForBitPos(idx)
 	n.Bitfield.SetBit(n.Bitfield, idx, 1)
 
-	p := &Pointer{Key: &k, Obj: v}
+	p := &Pointer{Key: k, Obj: v}
 
 	n.Pointers = append(n.Pointers[:i], append([]*Pointer{p}, n.Pointers[i:]...)...)
+	return nil
 }
 
 func (n *Node) setChild(i byte, p *Pointer) {
 	n.Pointers[i] = p
+}
+
+func (n *Node) rmChild(i byte) error {
+	copy(n.Pointers[i:], n.Pointers[i+1:])
+	n.Pointers = n.Pointers[:len(n.Pointers)-1]
+
+	return nil
+}
+
+func (n *Node) getChild(i byte) interface{} {
+	if int(i) >= len(n.Pointers) || i < 0 {
+		return nil
+	}
+
+	return n.Pointers[i]
 }

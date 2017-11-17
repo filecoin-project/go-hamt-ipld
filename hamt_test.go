@@ -24,12 +24,51 @@ func TestSetGet(t *testing.T) {
 	}
 
 	for k, v := range vals {
-		out, ok := n.Find(k)
-		if !ok {
+		out, err := n.Find(k)
+		if err != nil {
 			t.Fatal("should have found the thing")
 		}
 		if out != v {
 			t.Fatal("got wrong value")
+		}
+	}
+
+	for i := 0; i < 100; i++ {
+		_, err := n.Find(randString())
+		if err != ErrNotFound {
+			t.Fatal("should have gotten ErrNotFound, instead got: ", err)
+		}
+	}
+
+	for k := range vals {
+		next := randString()
+		n.Set(k, next)
+		vals[k] = next
+	}
+
+	for k, v := range vals {
+		out, err := n.Find(k)
+		if err != nil {
+			t.Fatal("should have found the thing")
+		}
+		if out != v {
+			t.Fatal("got wrong value")
+		}
+	}
+
+	for i := 0; i < 100; i++ {
+		err := n.Delete(randString())
+		if err != ErrNotFound {
+			t.Fatal("should have gotten ErrNotFound, instead got: ", err)
+		}
+	}
+
+	for k := range vals {
+		if err := n.Delete(k); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := n.Find(k); err != ErrNotFound {
+			t.Fatal("Expected ErrNotFound, got: ", err)
 		}
 	}
 }
