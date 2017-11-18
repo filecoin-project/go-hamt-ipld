@@ -68,7 +68,12 @@ func (n *Node) getValue(hv []byte, depth int, k string, cb func(*Pointer) error)
 
 		return ErrNotFound
 	case []*Pointer:
-		panic("NYI")
+		for _, p := range child {
+			if p.Key == k {
+				return cb(p)
+			}
+		}
+		return ErrNotFound
 	default:
 		panic("invariant invalidated")
 	}
@@ -101,8 +106,17 @@ func (n *Node) modifyValue(hv []byte, depth int, k string, v interface{}) error 
 				case 0:
 					return fmt.Errorf("incorrectly formed HAMT")
 				case 1:
-					n.setChild(cindex, chnd.Pointers[0])
-					return nil
+					// TODO: only do this if its a value, cant do this for shards unless pairs requirements are met.
+
+					switch ps := chnd.Pointers[0].(type) {
+					case *Pointer:
+						if ps.isShard() {
+							return nil
+						}
+						return n.setChild(cindex, chnd.Pointers[0])
+					case []*Pointer:
+						return n.setChild(cindex, chnd.Pointers[0])
+					}
 				}
 			}
 			return nil
@@ -120,29 +134,58 @@ func (n *Node) modifyValue(hv []byte, depth int, k string, v interface{}) error 
 				return ErrNotFound
 			}
 			p2 := &Pointer{Key: k, Obj: v}
-			n.setChild(cindex, []*Pointer{child, p2})
-			return nil
+			return n.setChild(cindex, []*Pointer{child, p2})
 		}
 	case []*Pointer:
 		if v == nil {
 			for i, p := range child {
 				if p.Key == k {
-					_ = i
-					panic("NYI")
+					for _, p := range child {
+						if p.Key == "8e6c4f26d7304255" {
+							panic("Oh no")
+						}
+					}
+					if len(child) == 2 {
+						return n.setChild(cindex, child[(i+1)%2])
+					}
+					copy(child[i:], child[i+1:])
+					return n.setChild(cindex, child[:len(child)-1])
 				}
 			}
 			return ErrNotFound
+		}
+
+		for _, p := range child {
+			if p.Key == k {
+				p.Obj = v
+				return nil
+			}
+		}
+
+		if len(child) >= 3 {
+			sub := NewNode()
+			if err := sub.modifyValue(hv, depth+1, k, v); err != nil {
+				return err
+			}
+
+			for _, p := range child {
+				if err := sub.modifyValue(hash(p.Key), depth+1, p.Key, p.Obj); err != nil {
+					return err
+				}
+			}
+
+			return n.setChild(cindex, &Pointer{Prefix: &cindex, Obj: sub})
 		}
 
 		np := &Pointer{Key: k, Obj: v}
 		for i := 0; i < len(child); i++ {
 			if k < child[i].Key {
 				child = append(child[:i], append([]*Pointer{np}, child[i:]...)...)
-				return nil
+				return n.setChild(cindex, child)
 			}
 		}
 		child = append(child, np)
-		return nil
+		return n.setChild(cindex, child)
 	default:
 		panic("no")
 	}
@@ -162,8 +205,9 @@ func (n *Node) insertChild(idx int, k string, v interface{}) error {
 	return nil
 }
 
-func (n *Node) setChild(i byte, p interface{}) {
+func (n *Node) setChild(i byte, p interface{}) error {
 	n.Pointers[i] = p
+	return nil
 }
 
 func (n *Node) rmChild(i byte) error {
@@ -179,4 +223,8 @@ func (n *Node) getChild(i byte) interface{} {
 	}
 
 	return n.Pointers[i]
+}
+
+func (p *Pointer) isShard() bool {
+	return p.Prefix != nil
 }

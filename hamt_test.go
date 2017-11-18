@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/rand"
+	"strings"
 	"testing"
 )
 
@@ -52,26 +53,37 @@ func dotGraphRec(n *Node, name *int) {
 	cur := *name
 	for _, p := range n.Pointers {
 		*name++
-		fmt.Printf("\tn%d -> n%d;\n", cur, *name)
 		switch p := p.(type) {
 		case *Pointer:
 			if ch, ok := p.Obj.(*Node); ok {
+				fmt.Printf("\tn%d -> n%d;\n", cur, *name)
 				dotGraphRec(ch, name)
+			} else {
+				fmt.Printf("\tn%d -> n%s;\n", cur, p.Key)
 			}
 		case []*Pointer:
-			panic("NYI")
+			var names []string
+			for _, pt := range p {
+				names = append(names, pt.Key)
+			}
+			fmt.Printf("\tn%d -> n%s;\n", cur, strings.Join(names, "-"))
 		}
 	}
 }
 
 func TestSetGet(t *testing.T) {
+	rand.Seed(6)
 	vals := make(map[string]string)
-	for i := 0; i < 200; i++ {
-		vals[randString()] = randString()
+	var keys []string
+	for i := 0; i < 100000; i++ {
+		s := randString()
+		vals[s] = randString()
+		keys = append(keys, s)
 	}
+
 	n := NewNode()
-	for k, v := range vals {
-		n.Set(k, v)
+	for _, k := range keys {
+		n.Set(k, vals[k])
 	}
 
 	for k, v := range vals {
@@ -107,15 +119,18 @@ func TestSetGet(t *testing.T) {
 		}
 	}
 
-	for i := 0; i < 100; i++ {
-		err := n.Delete(randString())
-		if err != ErrNotFound {
-			t.Fatal("should have gotten ErrNotFound, instead got: ", err)
+	/*
+		for i := 0; i < 100; i++ {
+			err := n.Delete(randString())
+			if err != ErrNotFound {
+				t.Fatal("should have gotten ErrNotFound, instead got: ", err)
+			}
 		}
-	}
+	*/
 
-	for k := range vals {
+	for _, k := range keys {
 		if err := n.Delete(k); err != nil {
+			fmt.Println(k)
 			t.Fatal(err)
 		}
 		if _, err := n.Find(k); err != ErrNotFound {
