@@ -58,7 +58,7 @@ func (n *Node) getValue(hv []byte, depth int, k string, cb func(*Pointer) error)
 
 	switch child := child.(type) {
 	case *Pointer:
-		if child.Prefix != nil {
+		if child.isShard() {
 			return child.Obj.(*Node).getValue(hv, depth+1, k, cb)
 		}
 
@@ -94,7 +94,7 @@ func (n *Node) modifyValue(hv []byte, depth int, k string, v interface{}) error 
 
 	switch child := n.getChild(cindex).(type) {
 	case *Pointer:
-		if child.Prefix != nil {
+		if child.isShard() {
 			chnd := child.Obj.(*Node)
 			if err := chnd.modifyValue(hv, depth+1, k, v); err != nil {
 				return err
