@@ -1,6 +1,7 @@
 package hamt
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
 	"math/rand"
@@ -14,34 +15,6 @@ func randString() string {
 	return hex.EncodeToString(buf)
 }
 
-func verifyStructure(n *Node) error {
-	for _, p := range n.Pointers {
-		if len(p) == 1 {
-			p := p[0]
-			switch ch := p.Obj.(type) {
-			case string:
-				continue
-			case *Node:
-				switch len(ch.Pointers) {
-				case 0:
-					return fmt.Errorf("node has child with no children")
-				case 1:
-					return fmt.Errorf("node has child with only a single child")
-				default:
-					if err := verifyStructure(ch); err != nil {
-						return err
-					}
-				}
-			default:
-				panic("wrong type")
-			}
-		} else {
-			panic("NYI")
-		}
-	}
-	return nil
-}
-
 func dotGraph(n *Node) {
 	fmt.Println("digraph foo {")
 	name := 0
@@ -53,17 +26,12 @@ func dotGraphRec(n *Node, name *int) {
 	cur := *name
 	for _, p := range n.Pointers {
 		*name++
-		if len(p) == 1 {
-			p := p[0]
-			if ch, ok := p.Obj.(*Node); ok {
-				fmt.Printf("\tn%d -> n%d;\n", cur, *name)
-				dotGraphRec(ch, name)
-			} else {
-				fmt.Printf("\tn%d -> n%s;\n", cur, p.Key)
-			}
+		if p.isShard() {
+			fmt.Printf("\tn%d -> n%d;\n", cur, *name)
+			dotGraphRec(p.Link, name)
 		} else {
 			var names []string
-			for _, pt := range p {
+			for _, pt := range p.KVs {
 				names = append(names, pt.Key)
 			}
 			fmt.Printf("\tn%d -> n%s;\n", cur, strings.Join(names, "-"))
@@ -72,6 +40,7 @@ func dotGraphRec(n *Node, name *int) {
 }
 
 func TestSetGet(t *testing.T) {
+	ctx := context.Background()
 	vals := make(map[string]string)
 	var keys []string
 	for i := 0; i < 100000; i++ {
@@ -82,11 +51,11 @@ func TestSetGet(t *testing.T) {
 
 	n := NewNode()
 	for _, k := range keys {
-		n.Set(k, vals[k])
+		n.Set(ctx, k, vals[k])
 	}
 
 	for k, v := range vals {
-		out, err := n.Find(k)
+		out, err := n.Find(ctx, k)
 		if err != nil {
 			t.Fatal("should have found the thing")
 		}
@@ -96,7 +65,7 @@ func TestSetGet(t *testing.T) {
 	}
 
 	for i := 0; i < 100; i++ {
-		_, err := n.Find(randString())
+		_, err := n.Find(ctx, randString())
 		if err != ErrNotFound {
 			t.Fatal("should have gotten ErrNotFound, instead got: ", err)
 		}
@@ -104,32 +73,32 @@ func TestSetGet(t *testing.T) {
 
 	for k := range vals {
 		next := randString()
-		n.Set(k, next)
+		n.Set(ctx, k, next)
 		vals[k] = next
 	}
 
 	for k, v := range vals {
-		out, err := n.Find(k)
+		out, err := n.Find(ctx, k)
 		if err != nil {
 			t.Fatal("should have found the thing")
 		}
 		if out != v {
-			t.Fatal("got wrong value")
+			t.Fatal("got wrong value after value change")
 		}
 	}
 
 	for i := 0; i < 100; i++ {
-		err := n.Delete(randString())
+		err := n.Delete(ctx, randString())
 		if err != ErrNotFound {
 			t.Fatal("should have gotten ErrNotFound, instead got: ", err)
 		}
 	}
 
 	for _, k := range keys {
-		if err := n.Delete(k); err != nil {
+		if err := n.Delete(ctx, k); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := n.Find(k); err != ErrNotFound {
+		if _, err := n.Find(ctx, k); err != ErrNotFound {
 			t.Fatal("Expected ErrNotFound, got: ", err)
 		}
 	}

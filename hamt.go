@@ -1,14 +1,20 @@
 package hamt
 
 import (
+	"context"
 	"crypto/md5"
 	"fmt"
 	"math/big"
+
+	cid "gx/ipfs/QmNp85zy9RLrQ5oQD4hPyS39ezrrXpcaa7R4Y9kxdWQLLQ/go-cid"
 )
 
 type Node struct {
 	Bitfield *big.Int
-	Pointers [][]*Pointer
+	Pointers []*Pointer
+
+	// for fetching and storing chilren
+	store *CborIpldStore
 }
 
 func NewNode() *Node {
@@ -17,21 +23,27 @@ func NewNode() *Node {
 	}
 }
 
-type Pointer struct {
-	Prefix *byte
-	Key    string
-	Obj    interface{}
+type KV struct {
+	Key   string
+	Value string
 }
+
+type Pointer struct {
+	KVs  []*KV
+	Link *Node
+}
+
+var _ = cid.Cid{}
 
 func hash(k string) []byte {
 	s := md5.Sum([]byte(k))
 	return s[:]
 }
 
-func (n *Node) Find(k string) (string, error) {
+func (n *Node) Find(ctx context.Context, k string) (string, error) {
 	var out string
-	err := n.getValue(hash(k), 0, k, func(p *Pointer) error {
-		out = p.Obj.(string)
+	err := n.getValue(ctx, hash(k), 0, k, func(kv *KV) error {
+		out = kv.Value
 		return nil
 	})
 	if err != nil {
@@ -40,13 +52,13 @@ func (n *Node) Find(k string) (string, error) {
 	return out, nil
 }
 
-func (n *Node) Delete(k string) error {
-	return n.modifyValue(hash(k), 0, k, nil)
+func (n *Node) Delete(ctx context.Context, k string) error {
+	return n.modifyValue(ctx, hash(k), 0, k, nil)
 }
 
 var ErrNotFound = fmt.Errorf("not found")
 
-func (n *Node) getValue(hv []byte, depth int, k string, cb func(*Pointer) error) error {
+func (n *Node) getValue(ctx context.Context, hv []byte, depth int, k string, cb func(*KV) error) error {
 	idx := hv[depth]
 	if n.Bitfield.Bit(int(idx)) == 0 {
 		return ErrNotFound
@@ -54,24 +66,43 @@ func (n *Node) getValue(hv []byte, depth int, k string, cb func(*Pointer) error)
 
 	cindex := byte(n.indexForBitPos(int(idx)))
 
-	for _, c := range n.getChild(cindex) {
-		if c.isShard() {
-			return c.Obj.(*Node).getValue(hv, depth+1, k, cb)
+	c := n.getChild(cindex)
+	if c.isShard() {
+		chnd, err := c.loadChild(ctx, n.store)
+		if err != nil {
+			return err
 		}
 
-		if c.Key == k {
-			return cb(c)
+		return chnd.getValue(ctx, hv, depth+1, k, cb)
+	}
+
+	for _, kv := range c.KVs {
+		if kv.Key == k {
+			return cb(kv)
 		}
 	}
 
 	return ErrNotFound
 }
 
-func (n *Node) Set(k string, v string) error {
-	return n.modifyValue(hash(k), 0, k, v)
+func (p *Pointer) loadChild(ctx context.Context, ns *CborIpldStore) (*Node, error) {
+	return p.Link, nil
+	/*
+		var out Node
+		if err := ns.Get(ctx, p.Link, &out); err != nil {
+			return nil, err
+		}
+
+		out.store = ns
+		return &out, nil
+	*/
 }
 
-func (n *Node) modifyValue(hv []byte, depth int, k string, v interface{}) error {
+func (n *Node) Set(ctx context.Context, k string, v string) error {
+	return n.modifyValue(ctx, hash(k), 0, k, v)
+}
+
+func (n *Node) modifyValue(ctx context.Context, hv []byte, depth int, k string, v interface{}) error {
 	idx := int(hv[depth])
 
 	if n.Bitfield.Bit(idx) != 1 {
@@ -81,110 +112,102 @@ func (n *Node) modifyValue(hv []byte, depth int, k string, v interface{}) error 
 	cindex := byte(n.indexForBitPos(idx))
 
 	child := n.getChild(cindex)
-	if len(child) == 1 {
-		child := child[0]
-		if child.isShard() {
-			chnd := child.Obj.(*Node)
-			if err := chnd.modifyValue(hv, depth+1, k, v); err != nil {
-				return err
-			}
+	if child.isShard() {
+		chnd, err := child.loadChild(ctx, n.store)
+		if err != nil {
+			return err
+		}
 
-			// CHAMP optimization, ensure trees look correct after deletions
-			if v == nil {
-				switch len(chnd.Pointers) {
-				case 0:
-					return fmt.Errorf("incorrectly formed HAMT")
-				case 1:
-					// TODO: only do this if its a value, cant do this for shards unless pairs requirements are met.
+		if err := chnd.modifyValue(ctx, hv, depth+1, k, v); err != nil {
+			return err
+		}
 
-					ps := chnd.Pointers[0]
-					if len(ps) == 1 && ps[0].isShard() {
+		// CHAMP optimization, ensure trees look correct after deletions
+		if v == nil {
+			switch len(chnd.Pointers) {
+			case 0:
+				return fmt.Errorf("incorrectly formed HAMT")
+			case 1:
+				// TODO: only do this if its a value, cant do this for shards unless pairs requirements are met.
+
+				ps := chnd.Pointers[0]
+				if ps.isShard() {
+					return nil
+				}
+
+				return n.setChild(cindex, ps)
+			case 2, 3:
+				var chvals []*KV
+				for _, p := range chnd.Pointers {
+					if p.isShard() {
 						return nil
 					}
 
-					return n.setChild(cindex, chnd.Pointers[0])
-				case 2, 3:
-					var chvals []*Pointer
-					for _, p := range chnd.Pointers {
-						for _, sp := range p {
-							if len(chvals) == 3 {
-								return nil
-							}
-							if sp.isShard() {
-								return nil
-							}
-							chvals = append(chvals, sp)
+					for _, sp := range p.KVs {
+						if len(chvals) == 3 {
+							return nil
 						}
+						chvals = append(chvals, sp)
 					}
-					return n.setChild(cindex, chvals)
 				}
+				return n.setChild(cindex, &Pointer{KVs: chvals})
 			}
-			return nil
 		}
+		return nil
+	}
 
-		if child.Key == k {
-			if v == nil {
-				n.Bitfield.SetBit(n.Bitfield, idx, 0)
-				return n.rmChild(cindex)
-			}
-			child.Obj = v
-			return nil
-		} else {
-			if v == nil {
-				return ErrNotFound
-			}
-			p2 := &Pointer{Key: k, Obj: v}
-			return n.setChild(cindex, []*Pointer{child, p2})
-		}
-	} else {
-		if v == nil {
-			for i, p := range child {
-				if p.Key == k {
-					if len(child) == 2 {
-						return n.setChild(cindex, child[(i+1)%2])
-					}
-					copy(child[i:], child[i+1:])
-					return n.setChild(cindex, child[:len(child)-1])
-				}
-			}
-			return ErrNotFound
-		}
-
-		// check if key already exists
-		for _, p := range child {
+	if v == nil {
+		for i, p := range child.KVs {
 			if p.Key == k {
-				p.Obj = v
+				/* this case is probably no longer needed
+				if len(child.KVs) == 2 {
+					child.KVs = []KV{child[(i+1)%2]}
+					return
+				}
+				*/
+				copy(child.KVs[i:], child.KVs[i+1:])
+				child.KVs = child.KVs[:len(child.KVs)-1]
 				return nil
 			}
 		}
+		return ErrNotFound
+	}
 
-		// If the array is full, create a subshard and insert everything into it
-		if len(child) >= 3 {
-			sub := NewNode()
-			if err := sub.modifyValue(hv, depth+1, k, v); err != nil {
+	// check if key already exists
+	for _, p := range child.KVs {
+		if p.Key == k {
+			p.Value = v.(string)
+			return nil
+		}
+	}
+
+	// If the array is full, create a subshard and insert everything into it
+	if len(child.KVs) >= 3 {
+		sub := NewNode()
+		sub.store = n.store
+		if err := sub.modifyValue(ctx, hv, depth+1, k, v); err != nil {
+			return err
+		}
+
+		for _, p := range child.KVs {
+			if err := sub.modifyValue(ctx, hash(p.Key), depth+1, p.Key, p.Value); err != nil {
 				return err
 			}
-
-			for _, p := range child {
-				if err := sub.modifyValue(hash(p.Key), depth+1, p.Key, p.Obj); err != nil {
-					return err
-				}
-			}
-
-			return n.setChild(cindex, &Pointer{Prefix: &cindex, Obj: sub})
 		}
 
-		// otherwise insert the new element into the array in order
-		np := &Pointer{Key: k, Obj: v}
-		for i := 0; i < len(child); i++ {
-			if k < child[i].Key {
-				child = append(child[:i], append([]*Pointer{np}, child[i:]...)...)
-				return n.setChild(cindex, child)
-			}
-		}
-		child = append(child, np)
-		return n.setChild(cindex, child)
+		return n.setChild(cindex, &Pointer{Link: sub})
 	}
+
+	// otherwise insert the new element into the array in order
+	np := &KV{Key: k, Value: v.(string)}
+	for i := 0; i < len(child.KVs); i++ {
+		if k < child.KVs[i].Key {
+			child.KVs = append(child.KVs[:i], append([]*KV{np}, child.KVs[i:]...)...)
+			return nil
+		}
+	}
+	child.KVs = append(child.KVs, np)
+	return nil
 }
 
 func (n *Node) insertChild(idx int, k string, v interface{}) error {
@@ -195,21 +218,14 @@ func (n *Node) insertChild(idx int, k string, v interface{}) error {
 	i := n.indexForBitPos(idx)
 	n.Bitfield.SetBit(n.Bitfield, idx, 1)
 
-	p := &Pointer{Key: k, Obj: v}
+	p := &Pointer{KVs: []*KV{{Key: k, Value: v.(string)}}}
 
-	n.Pointers = append(n.Pointers[:i], append([][]*Pointer{{p}}, n.Pointers[i:]...)...)
+	n.Pointers = append(n.Pointers[:i], append([]*Pointer{p}, n.Pointers[i:]...)...)
 	return nil
 }
 
-func (n *Node) setChild(i byte, p interface{}) error {
-	switch p := p.(type) {
-	case *Pointer:
-		n.Pointers[i] = []*Pointer{p}
-	case []*Pointer:
-		n.Pointers[i] = p
-	default:
-		panic("invalid type")
-	}
+func (n *Node) setChild(i byte, p *Pointer) error {
+	n.Pointers[i] = p
 	return nil
 }
 
@@ -220,7 +236,7 @@ func (n *Node) rmChild(i byte) error {
 	return nil
 }
 
-func (n *Node) getChild(i byte) []*Pointer {
+func (n *Node) getChild(i byte) *Pointer {
 	if int(i) >= len(n.Pointers) || i < 0 {
 		return nil
 	}
@@ -229,5 +245,5 @@ func (n *Node) getChild(i byte) []*Pointer {
 }
 
 func (p *Pointer) isShard() bool {
-	return p.Prefix != nil
+	return p.Link != nil
 }
