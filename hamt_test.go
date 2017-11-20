@@ -16,8 +16,8 @@ func randString() string {
 
 func verifyStructure(n *Node) error {
 	for _, p := range n.Pointers {
-		switch p := p.(type) {
-		case *Pointer:
+		if len(p) == 1 {
+			p := p[0]
 			switch ch := p.Obj.(type) {
 			case string:
 				continue
@@ -35,7 +35,7 @@ func verifyStructure(n *Node) error {
 			default:
 				panic("wrong type")
 			}
-		case []*Pointer:
+		} else {
 			panic("NYI")
 		}
 	}
@@ -53,15 +53,15 @@ func dotGraphRec(n *Node, name *int) {
 	cur := *name
 	for _, p := range n.Pointers {
 		*name++
-		switch p := p.(type) {
-		case *Pointer:
+		if len(p) == 1 {
+			p := p[0]
 			if ch, ok := p.Obj.(*Node); ok {
 				fmt.Printf("\tn%d -> n%d;\n", cur, *name)
 				dotGraphRec(ch, name)
 			} else {
 				fmt.Printf("\tn%d -> n%s;\n", cur, p.Key)
 			}
-		case []*Pointer:
+		} else {
 			var names []string
 			for _, pt := range p {
 				names = append(names, pt.Key)
@@ -72,7 +72,6 @@ func dotGraphRec(n *Node, name *int) {
 }
 
 func TestSetGet(t *testing.T) {
-	rand.Seed(6)
 	vals := make(map[string]string)
 	var keys []string
 	for i := 0; i < 100000; i++ {
@@ -119,18 +118,15 @@ func TestSetGet(t *testing.T) {
 		}
 	}
 
-	/*
-		for i := 0; i < 100; i++ {
-			err := n.Delete(randString())
-			if err != ErrNotFound {
-				t.Fatal("should have gotten ErrNotFound, instead got: ", err)
-			}
+	for i := 0; i < 100; i++ {
+		err := n.Delete(randString())
+		if err != ErrNotFound {
+			t.Fatal("should have gotten ErrNotFound, instead got: ", err)
 		}
-	*/
+	}
 
 	for _, k := range keys {
 		if err := n.Delete(k); err != nil {
-			fmt.Println(k)
 			t.Fatal(err)
 		}
 		if _, err := n.Find(k); err != ErrNotFound {

@@ -8,7 +8,7 @@ import (
 
 type Node struct {
 	Bitfield *big.Int
-	Pointers []interface{}
+	Pointers [][]*Pointer
 }
 
 func NewNode() *Node {
@@ -54,29 +54,17 @@ func (n *Node) getValue(hv []byte, depth int, k string, cb func(*Pointer) error)
 
 	cindex := byte(n.indexForBitPos(int(idx)))
 
-	child := n.getChild(cindex)
-
-	switch child := child.(type) {
-	case *Pointer:
-		if child.isShard() {
-			return child.Obj.(*Node).getValue(hv, depth+1, k, cb)
+	for _, c := range n.getChild(cindex) {
+		if c.isShard() {
+			return c.Obj.(*Node).getValue(hv, depth+1, k, cb)
 		}
 
-		if child.Key == k {
+		if c.Key == k {
 			return cb(child)
 		}
-
-		return ErrNotFound
-	case []*Pointer:
-		for _, p := range child {
-			if p.Key == k {
-				return cb(p)
-			}
-		}
-		return ErrNotFound
-	default:
-		panic("invariant invalidated")
 	}
+
+	return ErrNotFound
 }
 
 func (n *Node) Set(k string, v string) error {
@@ -92,8 +80,9 @@ func (n *Node) modifyValue(hv []byte, depth int, k string, v interface{}) error 
 
 	cindex := byte(n.indexForBitPos(idx))
 
-	switch child := n.getChild(cindex).(type) {
-	case *Pointer:
+	child := n.getChild(cindex)
+	if len(child) == 1 {
+		child := child[0]
 		if child.isShard() {
 			chnd := child.Obj.(*Node)
 			if err := chnd.modifyValue(hv, depth+1, k, v); err != nil {
@@ -108,15 +97,26 @@ func (n *Node) modifyValue(hv []byte, depth int, k string, v interface{}) error 
 				case 1:
 					// TODO: only do this if its a value, cant do this for shards unless pairs requirements are met.
 
-					switch ps := chnd.Pointers[0].(type) {
-					case *Pointer:
-						if ps.isShard() {
-							return nil
-						}
-						return n.setChild(cindex, chnd.Pointers[0])
-					case []*Pointer:
-						return n.setChild(cindex, chnd.Pointers[0])
+					ps := chnd.Pointers[0]
+					if len(ps) == 1 && ps[0].isShard() {
+						return nil
 					}
+
+					return n.setChild(cindex, chnd.Pointers[0])
+				case 2, 3:
+					var chvals []*Pointer
+					for _, p := range chnd.Pointers {
+						for _, sp := range p {
+							if len(chvals) == 3 {
+								return nil
+							}
+							if sp.isShard() {
+								return nil
+							}
+							chvals = append(chvals, sp)
+						}
+					}
+					return n.setChild(cindex, chvals)
 				}
 			}
 			return nil
@@ -136,15 +136,10 @@ func (n *Node) modifyValue(hv []byte, depth int, k string, v interface{}) error 
 			p2 := &Pointer{Key: k, Obj: v}
 			return n.setChild(cindex, []*Pointer{child, p2})
 		}
-	case []*Pointer:
+	} else {
 		if v == nil {
 			for i, p := range child {
 				if p.Key == k {
-					for _, p := range child {
-						if p.Key == "8e6c4f26d7304255" {
-							panic("Oh no")
-						}
-					}
 					if len(child) == 2 {
 						return n.setChild(cindex, child[(i+1)%2])
 					}
@@ -155,6 +150,7 @@ func (n *Node) modifyValue(hv []byte, depth int, k string, v interface{}) error 
 			return ErrNotFound
 		}
 
+		// check if key already exists
 		for _, p := range child {
 			if p.Key == k {
 				p.Obj = v
@@ -162,6 +158,7 @@ func (n *Node) modifyValue(hv []byte, depth int, k string, v interface{}) error 
 			}
 		}
 
+		// If the array is full, create a subshard and insert everything into it
 		if len(child) >= 3 {
 			sub := NewNode()
 			if err := sub.modifyValue(hv, depth+1, k, v); err != nil {
@@ -177,6 +174,7 @@ func (n *Node) modifyValue(hv []byte, depth int, k string, v interface{}) error 
 			return n.setChild(cindex, &Pointer{Prefix: &cindex, Obj: sub})
 		}
 
+		// otherwise insert the new element into the array in order
 		np := &Pointer{Key: k, Obj: v}
 		for i := 0; i < len(child); i++ {
 			if k < child[i].Key {
@@ -186,8 +184,6 @@ func (n *Node) modifyValue(hv []byte, depth int, k string, v interface{}) error 
 		}
 		child = append(child, np)
 		return n.setChild(cindex, child)
-	default:
-		panic("no")
 	}
 }
 
@@ -201,12 +197,19 @@ func (n *Node) insertChild(idx int, k string, v interface{}) error {
 
 	p := &Pointer{Key: k, Obj: v}
 
-	n.Pointers = append(n.Pointers[:i], append([]interface{}{p}, n.Pointers[i:]...)...)
+	n.Pointers = append(n.Pointers[:i], append([][]*Pointer{{p}}, n.Pointers[i:]...)...)
 	return nil
 }
 
 func (n *Node) setChild(i byte, p interface{}) error {
-	n.Pointers[i] = p
+	switch p := p.(type) {
+	case *Pointer:
+		n.Pointers[i] = []*Pointer{p}
+	case []*Pointer:
+		n.Pointers[i] = p
+	default:
+		panic("invalid type")
+	}
 	return nil
 }
 
@@ -217,7 +220,7 @@ func (n *Node) rmChild(i byte) error {
 	return nil
 }
 
-func (n *Node) getChild(i byte) interface{} {
+func (n *Node) getChild(i byte) []*Pointer {
 	if int(i) >= len(n.Pointers) || i < 0 {
 		return nil
 	}
