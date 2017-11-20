@@ -60,7 +60,7 @@ func (n *Node) getValue(hv []byte, depth int, k string, cb func(*Pointer) error)
 		}
 
 		if c.Key == k {
-			return cb(child)
+			return cb(c)
 		}
 	}
 
