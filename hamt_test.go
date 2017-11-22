@@ -7,10 +7,17 @@ import (
 	"math/rand"
 	"strings"
 	"testing"
+	"time"
 )
 
 func randString() string {
-	buf := make([]byte, 8)
+	buf := make([]byte, 18)
+	rand.Read(buf)
+	return hex.EncodeToString(buf)
+}
+
+func randValue() string {
+	buf := make([]byte, 30)
 	rand.Read(buf)
 	return hex.EncodeToString(buf)
 }
@@ -25,18 +32,51 @@ func dotGraph(n *Node) {
 func dotGraphRec(n *Node, name *int) {
 	cur := *name
 	for _, p := range n.Pointers {
-		*name++
 		if p.isShard() {
+			*name++
 			fmt.Printf("\tn%d -> n%d;\n", cur, *name)
-			dotGraphRec(p.Link, name)
+			nd, err := p.loadChild(context.Background(), n.store)
+			if err != nil {
+				panic(err)
+			}
+
+			dotGraphRec(nd, name)
 		} else {
 			var names []string
 			for _, pt := range p.KVs {
 				names = append(names, pt.Key)
 			}
-			fmt.Printf("\tn%d -> n%s;\n", cur, strings.Join(names, "-"))
+			fmt.Printf("\tn%d -> n%s;\n", cur, strings.Join(names, "_"))
 		}
 	}
+}
+
+func stats(n *Node) (int, int, int, int) {
+	var totalnodes, totalkvs, pairs, triples int
+	totalnodes = 1
+	for _, p := range n.Pointers {
+		if p.isShard() {
+			nd, err := p.loadChild(context.Background(), n.store)
+			if err != nil {
+				panic(err)
+			}
+
+			t, k, two, three := stats(nd)
+			totalnodes += t
+			totalkvs += k
+			pairs += two
+			triples += three
+		} else {
+			totalkvs += len(p.KVs)
+			switch len(p.KVs) {
+			case 2:
+				pairs++
+			case 3:
+				triples++
+			}
+		}
+	}
+	return totalnodes, totalkvs, pairs, triples
 }
 
 func TestSetGet(t *testing.T) {
@@ -45,24 +85,56 @@ func TestSetGet(t *testing.T) {
 	var keys []string
 	for i := 0; i < 100000; i++ {
 		s := randString()
-		vals[s] = randString()
+		vals[s] = randValue()
 		keys = append(keys, s)
 	}
 
-	n := NewNode()
+	cs := NewCborStore()
+	begn := NewNode()
+	begn.store = cs
 	for _, k := range keys {
-		n.Set(ctx, k, vals[k])
+		begn.Set(ctx, k, vals[k])
 	}
 
+	size, err := begn.checkSize(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mapsize := 0
+	for k, v := range vals {
+		mapsize += (len(k) + len(v))
+	}
+	fmt.Printf("Total size is: %d, size of keys+vals: %d, overhead: %.2f\n", size, mapsize, float64(size)/float64(mapsize))
+	fmt.Println(stats(begn))
+
+	fmt.Println("start flush")
+	bef := time.Now()
+	if err := begn.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	fmt.Println("flush took: ", time.Since(bef), puts)
+	c, err := cs.Put(ctx, begn)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var n Node
+	if err := cs.Get(ctx, c, &n); err != nil {
+		t.Fatal(err)
+	}
+	n.store = cs
+
+	bef = time.Now()
 	for k, v := range vals {
 		out, err := n.Find(ctx, k)
 		if err != nil {
-			t.Fatal("should have found the thing")
+			t.Fatal("should have found the thing: ", err)
 		}
 		if out != v {
 			t.Fatal("got wrong value")
 		}
 	}
+	fmt.Println("finds took: ", time.Since(bef))
 
 	for i := 0; i < 100; i++ {
 		_, err := n.Find(ctx, randString())
@@ -72,7 +144,7 @@ func TestSetGet(t *testing.T) {
 	}
 
 	for k := range vals {
-		next := randString()
+		next := randValue()
 		n.Set(ctx, k, next)
 		vals[k] = next
 	}

@@ -2,16 +2,16 @@ package hamt
 
 import (
 	"context"
-	"crypto/md5"
 	"fmt"
+	"hash/fnv"
 	"math/big"
 
 	cid "gx/ipfs/QmNp85zy9RLrQ5oQD4hPyS39ezrrXpcaa7R4Y9kxdWQLLQ/go-cid"
 )
 
 type Node struct {
-	Bitfield *big.Int
-	Pointers []*Pointer
+	Bitfield *big.Int   `refmt:"bf"`
+	Pointers []*Pointer `refmt:"p"`
 
 	// for fetching and storing chilren
 	store *CborIpldStore
@@ -29,14 +29,17 @@ type KV struct {
 }
 
 type Pointer struct {
-	KVs  []*KV
-	Link *Node
+	KVs  []*KV    `refmt:"v,omitempty"`
+	Link *cid.Cid `refmt:"l,omitempty"`
+
+	// cached node to avoid too many serialization operations
+	cache *Node
 }
 
 var _ = cid.Cid{}
 
 func hash(k string) []byte {
-	s := md5.Sum([]byte(k))
+	s := fnv.New128a().Sum([]byte(k))
 	return s[:]
 }
 
@@ -86,20 +89,103 @@ func (n *Node) getValue(ctx context.Context, hv []byte, depth int, k string, cb 
 }
 
 func (p *Pointer) loadChild(ctx context.Context, ns *CborIpldStore) (*Node, error) {
-	return p.Link, nil
-	/*
-		var out Node
-		if err := ns.Get(ctx, p.Link, &out); err != nil {
-			return nil, err
-		}
+	if p.cache != nil {
+		return p.cache, nil
+	}
 
-		out.store = ns
-		return &out, nil
-	*/
+	var out Node
+	if err := ns.Get(ctx, p.Link, &out); err != nil {
+		return nil, err
+	}
+
+	p.cache = &out
+	out.store = ns
+	return &out, nil
+}
+
+func (n *Node) checkSize(ctx context.Context) (uint64, error) {
+	c, err := n.store.Put(ctx, n)
+	if err != nil {
+		return 0, err
+	}
+
+	blk, err := n.store.bs.Get(c)
+	if err != nil {
+		return 0, err
+	}
+
+	totsize := uint64(len(blk.RawData()))
+	for _, ch := range n.Pointers {
+		if ch.isShard() {
+			chnd, err := ch.loadChild(ctx, n.store)
+			if err != nil {
+				return 0, err
+			}
+			chsize, err := chnd.checkSize(ctx)
+			if err != nil {
+				return 0, err
+			}
+			totsize += chsize
+		}
+	}
+
+	return totsize, nil
+}
+
+func (n *Node) Flush(ctx context.Context) error {
+	for _, p := range n.Pointers {
+		if p.cache != nil {
+			if err := p.cache.Flush(ctx); err != nil {
+				return err
+			}
+
+			c, err := n.store.Put(ctx, p.cache)
+			if err != nil {
+				return err
+			}
+
+			p.cache = nil
+			p.Link = c
+		}
+	}
+	return nil
 }
 
 func (n *Node) Set(ctx context.Context, k string, v string) error {
 	return n.modifyValue(ctx, hash(k), 0, k, v)
+}
+
+func (n *Node) cleanChild(chnd *Node, cindex byte) error {
+	switch len(chnd.Pointers) {
+	case 0:
+		return fmt.Errorf("incorrectly formed HAMT")
+	case 1:
+		// TODO: only do this if its a value, cant do this for shards unless pairs requirements are met.
+
+		ps := chnd.Pointers[0]
+		if ps.isShard() {
+			return nil
+		}
+
+		return n.setChild(cindex, ps)
+	case 2, 3:
+		var chvals []*KV
+		for _, p := range chnd.Pointers {
+			if p.isShard() {
+				return nil
+			}
+
+			for _, sp := range p.KVs {
+				if len(chvals) == 3 {
+					return nil
+				}
+				chvals = append(chvals, sp)
+			}
+		}
+		return n.setChild(cindex, &Pointer{KVs: chvals})
+	default:
+		return nil
+	}
 }
 
 func (n *Node) modifyValue(ctx context.Context, hv []byte, depth int, k string, v interface{}) error {
@@ -124,35 +210,11 @@ func (n *Node) modifyValue(ctx context.Context, hv []byte, depth int, k string, 
 
 		// CHAMP optimization, ensure trees look correct after deletions
 		if v == nil {
-			switch len(chnd.Pointers) {
-			case 0:
-				return fmt.Errorf("incorrectly formed HAMT")
-			case 1:
-				// TODO: only do this if its a value, cant do this for shards unless pairs requirements are met.
-
-				ps := chnd.Pointers[0]
-				if ps.isShard() {
-					return nil
-				}
-
-				return n.setChild(cindex, ps)
-			case 2, 3:
-				var chvals []*KV
-				for _, p := range chnd.Pointers {
-					if p.isShard() {
-						return nil
-					}
-
-					for _, sp := range p.KVs {
-						if len(chvals) == 3 {
-							return nil
-						}
-						chvals = append(chvals, sp)
-					}
-				}
-				return n.setChild(cindex, &Pointer{KVs: chvals})
+			if err := n.cleanChild(chnd, cindex); err != nil {
+				return err
 			}
 		}
+
 		return nil
 	}
 
@@ -195,7 +257,12 @@ func (n *Node) modifyValue(ctx context.Context, hv []byte, depth int, k string, 
 			}
 		}
 
-		return n.setChild(cindex, &Pointer{Link: sub})
+		c, err := n.store.Put(ctx, sub)
+		if err != nil {
+			return err
+		}
+
+		return n.setChild(cindex, &Pointer{Link: c})
 	}
 
 	// otherwise insert the new element into the array in order
