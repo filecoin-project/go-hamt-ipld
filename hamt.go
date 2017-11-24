@@ -9,6 +9,8 @@ import (
 	cid "gx/ipfs/QmNp85zy9RLrQ5oQD4hPyS39ezrrXpcaa7R4Y9kxdWQLLQ/go-cid"
 )
 
+const arrayWidth = 3
+
 type Node struct {
 	Bitfield *big.Int   `refmt:"bf"`
 	Pointers []*Pointer `refmt:"p"`
@@ -156,10 +158,11 @@ func (n *Node) Set(ctx context.Context, k string, v string) error {
 }
 
 func (n *Node) cleanChild(chnd *Node, cindex byte) error {
-	switch len(chnd.Pointers) {
-	case 0:
+	l := len(chnd.Pointers)
+	switch {
+	case l == 0:
 		return fmt.Errorf("incorrectly formed HAMT")
-	case 1:
+	case l == 1:
 		// TODO: only do this if its a value, cant do this for shards unless pairs requirements are met.
 
 		ps := chnd.Pointers[0]
@@ -168,7 +171,7 @@ func (n *Node) cleanChild(chnd *Node, cindex byte) error {
 		}
 
 		return n.setChild(cindex, ps)
-	case 2, 3:
+	case l <= arrayWidth:
 		var chvals []*KV
 		for _, p := range chnd.Pointers {
 			if p.isShard() {
@@ -176,7 +179,7 @@ func (n *Node) cleanChild(chnd *Node, cindex byte) error {
 			}
 
 			for _, sp := range p.KVs {
-				if len(chvals) == 3 {
+				if len(chvals) == arrayWidth {
 					return nil
 				}
 				chvals = append(chvals, sp)
@@ -244,7 +247,7 @@ func (n *Node) modifyValue(ctx context.Context, hv []byte, depth int, k string, 
 	}
 
 	// If the array is full, create a subshard and insert everything into it
-	if len(child.KVs) >= 3 {
+	if len(child.KVs) >= arrayWidth {
 		sub := NewNode()
 		sub.store = n.store
 		if err := sub.modifyValue(ctx, hv, depth+1, k, v); err != nil {
