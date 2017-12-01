@@ -1,6 +1,7 @@
 package hamt
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"fmt"
@@ -16,10 +17,10 @@ func randString() string {
 	return hex.EncodeToString(buf)
 }
 
-func randValue() string {
+func randValue() []byte {
 	buf := make([]byte, 30)
 	rand.Read(buf)
-	return hex.EncodeToString(buf)
+	return buf
 }
 
 func dotGraph(n *Node) {
@@ -81,7 +82,7 @@ func stats(n *Node) (int, int, int, int) {
 
 func TestSetGet(t *testing.T) {
 	ctx := context.Background()
-	vals := make(map[string]string)
+	vals := make(map[string][]byte)
 	var keys []string
 	for i := 0; i < 100000; i++ {
 		s := randString()
@@ -90,8 +91,7 @@ func TestSetGet(t *testing.T) {
 	}
 
 	cs := NewCborStore()
-	begn := NewNode()
-	begn.store = cs
+	begn := NewNode(cs)
 	for _, k := range keys {
 		begn.Set(ctx, k, vals[k])
 	}
@@ -130,7 +130,7 @@ func TestSetGet(t *testing.T) {
 		if err != nil {
 			t.Fatal("should have found the thing: ", err)
 		}
-		if out != v {
+		if !bytes.Equal(out, v) {
 			t.Fatal("got wrong value")
 		}
 	}
@@ -154,7 +154,7 @@ func TestSetGet(t *testing.T) {
 		if err != nil {
 			t.Fatal("should have found the thing")
 		}
-		if out != v {
+		if !bytes.Equal(out, v) {
 			t.Fatal("got wrong value after value change")
 		}
 	}

@@ -19,15 +19,16 @@ type Node struct {
 	store *CborIpldStore
 }
 
-func NewNode() *Node {
+func NewNode(cs *CborIpldStore) *Node {
 	return &Node{
 		Bitfield: big.NewInt(0),
+		store:    cs,
 	}
 }
 
 type KV struct {
 	Key   string
-	Value string
+	Value []byte
 }
 
 type Pointer struct {
@@ -45,14 +46,14 @@ func hash(k string) []byte {
 	return s[:]
 }
 
-func (n *Node) Find(ctx context.Context, k string) (string, error) {
-	var out string
+func (n *Node) Find(ctx context.Context, k string) ([]byte, error) {
+	var out []byte
 	err := n.getValue(ctx, hash(k), 0, k, func(kv *KV) error {
 		out = kv.Value
 		return nil
 	})
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	return out, nil
 }
@@ -111,7 +112,7 @@ func (n *Node) checkSize(ctx context.Context) (uint64, error) {
 		return 0, err
 	}
 
-	blk, err := n.store.bs.Get(c)
+	blk, err := n.store.BlockService.GetBlock(ctx, c)
 	if err != nil {
 		return 0, err
 	}
@@ -153,7 +154,7 @@ func (n *Node) Flush(ctx context.Context) error {
 	return nil
 }
 
-func (n *Node) Set(ctx context.Context, k string, v string) error {
+func (n *Node) Set(ctx context.Context, k string, v []byte) error {
 	return n.modifyValue(ctx, hash(k), 0, k, v)
 }
 
@@ -241,15 +242,14 @@ func (n *Node) modifyValue(ctx context.Context, hv []byte, depth int, k string, 
 	// check if key already exists
 	for _, p := range child.KVs {
 		if p.Key == k {
-			p.Value = v.(string)
+			p.Value = v.([]byte)
 			return nil
 		}
 	}
 
 	// If the array is full, create a subshard and insert everything into it
 	if len(child.KVs) >= arrayWidth {
-		sub := NewNode()
-		sub.store = n.store
+		sub := NewNode(n.store)
 		if err := sub.modifyValue(ctx, hv, depth+1, k, v); err != nil {
 			return err
 		}
@@ -269,7 +269,7 @@ func (n *Node) modifyValue(ctx context.Context, hv []byte, depth int, k string, 
 	}
 
 	// otherwise insert the new element into the array in order
-	np := &KV{Key: k, Value: v.(string)}
+	np := &KV{Key: k, Value: v.([]byte)}
 	for i := 0; i < len(child.KVs); i++ {
 		if k < child.KVs[i].Key {
 			child.KVs = append(child.KVs[:i], append([]*KV{np}, child.KVs[i:]...)...)
@@ -288,7 +288,7 @@ func (n *Node) insertChild(idx int, k string, v interface{}) error {
 	i := n.indexForBitPos(idx)
 	n.Bitfield.SetBit(n.Bitfield, idx, 1)
 
-	p := &Pointer{KVs: []*KV{{Key: k, Value: v.(string)}}}
+	p := &Pointer{KVs: []*KV{{Key: k, Value: v.([]byte)}}}
 
 	n.Pointers = append(n.Pointers[:i], append([]*Pointer{p}, n.Pointers[i:]...)...)
 	return nil
@@ -312,6 +312,25 @@ func (n *Node) getChild(i byte) *Pointer {
 	}
 
 	return n.Pointers[i]
+}
+
+func (n *Node) Copy() *Node {
+	nn := &Node{
+		store:    n.store,
+		Bitfield: big.NewInt(0).Set(n.Bitfield),
+		Pointers: make([]*Pointer, len(n.Pointers)),
+	}
+
+	for i, p := range n.Pointers {
+		pp := nn.Pointers[i]
+		pp.Link = p.Link
+		pp.KVs = make([]*KV, len(p.KVs))
+		for j, kv := range p.KVs {
+			pp.KVs[j] = &KV{Key: kv.Key, Value: kv.Value}
+		}
+	}
+
+	return n
 }
 
 func (p *Pointer) isShard() bool {
