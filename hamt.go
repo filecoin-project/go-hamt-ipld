@@ -39,8 +39,6 @@ type Pointer struct {
 	cache *Node
 }
 
-var _ = cid.Cid{}
-
 func hash(k string) []byte {
 	s := fnv.New128a().Sum([]byte(k))
 	return s[:]
