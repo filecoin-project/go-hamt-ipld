@@ -4,7 +4,7 @@ gx:
 	go get github.com/whyrusleeping/gx
 	go get github.com/whyrusleeping/gx-go
 
-deps: gx covertools
+deps: gx 
 	gx --verbose install --global
 	gx-go rewrite
 
