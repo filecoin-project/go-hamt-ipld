@@ -11,8 +11,8 @@ import (
 
 	cbor "github.com/ipfs/go-ipld-cbor"
 	atlas "github.com/polydawn/refmt/obj/atlas"
-	cid "gx/ipfs/QmNp85zy9RLrQ5oQD4hPyS39ezrrXpcaa7R4Y9kxdWQLLQ/go-cid"
 	ds "gx/ipfs/QmdHG8MAuARdGHxx4rPQASLcvhz24fzjSQq7AJRAQEorq5/go-datastore"
+	cid "gx/ipfs/QmeSrf6pzut73u6zLQkRFQ3ygt3k6XFT2kjdYP8Tnkwwyg/go-cid"
 )
 
 // THIS IS ALL TEMPORARY CODE
