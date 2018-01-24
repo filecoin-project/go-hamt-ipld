@@ -5,14 +5,17 @@ import (
 	"math"
 	"time"
 
-	bstore "github.com/ipfs/go-ipfs/blocks/blockstore"
-	bserv "github.com/ipfs/go-ipfs/blockservice"
-	offline "github.com/ipfs/go-ipfs/exchange/offline"
+	/*
+		bstore "github.com/ipfs/go-ipfs/blocks/blockstore"
+		bserv "github.com/ipfs/go-ipfs/blockservice"
+		offline "github.com/ipfs/go-ipfs/exchange/offline"
+	*/
 
-	cbor "github.com/ipfs/go-ipld-cbor"
-	atlas "github.com/polydawn/refmt/obj/atlas"
-	ds "gx/ipfs/QmdHG8MAuARdGHxx4rPQASLcvhz24fzjSQq7AJRAQEorq5/go-datastore"
-	cid "gx/ipfs/QmeSrf6pzut73u6zLQkRFQ3ygt3k6XFT2kjdYP8Tnkwwyg/go-cid"
+	atlas "gx/ipfs/QmSaDQWMxJBMtzQWnGoDppbwSEbHv4aJcD86CMSdszPU4L/refmt/obj/atlas"
+	cbor "gx/ipfs/QmZpue627xQuNGXn7xHieSjSZ8N4jot6oBHwe9XTn3e4NU/go-ipld-cbor"
+	block "gx/ipfs/Qmej7nf81hi2x2tvjRBF3mcp74sQyuDH4VMYDGd1YtXjb2/go-block-format"
+	//ds "gx/ipfs/QmdHG8MAuARdGHxx4rPQASLcvhz24fzjSQq7AJRAQEorq5/go-datastore"
+	cid "gx/ipfs/QmcZfnkapfECQGcLZaf9B79NRg7cRa9EnZh4LSbkCzwNvY/go-cid"
 )
 
 // THIS IS ALL TEMPORARY CODE
@@ -35,19 +38,44 @@ func init() {
 }
 
 type CborIpldStore struct {
-	BlockService bserv.BlockService
+	Blocks blocks
+}
+
+type blocks interface {
+	GetBlock(context.Context, *cid.Cid) (block.Block, error)
+	AddBlock(block.Block) (*cid.Cid, error)
+}
+
+type mockBlocks struct {
+	data map[string][]byte
+}
+
+func newMockBlocks() *mockBlocks {
+	return &mockBlocks{make(map[string][]byte)}
+}
+
+func (mb *mockBlocks) GetBlock(ctx context.Context, cid *cid.Cid) (block.Block, error) {
+	d, ok := mb.data[cid.KeyString()]
+	if ok {
+		return block.NewBlock(d), nil
+	}
+	return nil, ErrNotFound
+}
+
+func (mb *mockBlocks) AddBlock(b block.Block) (*cid.Cid, error) {
+	mb.data[b.Cid().KeyString()] = b.RawData()
+	return b.Cid(), nil
 }
 
 func NewCborStore() *CborIpldStore {
-	bs := bstore.NewBlockstore(ds.NewMapDatastore())
-	return &CborIpldStore{bserv.New(bs, offline.Exchange(bs))}
+	return &CborIpldStore{newMockBlocks()}
 }
 
 func (s *CborIpldStore) Get(ctx context.Context, c *cid.Cid, out interface{}) error {
 	ctx, cancel := context.WithTimeout(ctx, time.Second*10)
 	defer cancel()
 
-	blk, err := s.BlockService.GetBlock(ctx, c)
+	blk, err := s.Blocks.GetBlock(ctx, c)
 	if err != nil {
 		return err
 	}
@@ -64,7 +92,7 @@ func (s *CborIpldStore) Put(ctx context.Context, v interface{}) (*cid.Cid, error
 		return nil, err
 	}
 
-	c, err := s.BlockService.AddBlock(nd)
+	c, err := s.Blocks.AddBlock(nd)
 	if err != nil {
 		return nil, err
 	}

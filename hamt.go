@@ -6,7 +6,7 @@ import (
 	"hash/fnv"
 	"math/big"
 
-	cid "gx/ipfs/QmeSrf6pzut73u6zLQkRFQ3ygt3k6XFT2kjdYP8Tnkwwyg/go-cid"
+	cid "gx/ipfs/QmcZfnkapfECQGcLZaf9B79NRg7cRa9EnZh4LSbkCzwNvY/go-cid"
 )
 
 const arrayWidth = 3
@@ -110,7 +110,7 @@ func (n *Node) checkSize(ctx context.Context) (uint64, error) {
 		return 0, err
 	}
 
-	blk, err := n.store.BlockService.GetBlock(ctx, c)
+	blk, err := n.store.Blocks.GetBlock(ctx, c)
 	if err != nil {
 		return 0, err
 	}
