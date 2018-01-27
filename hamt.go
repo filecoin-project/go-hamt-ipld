@@ -94,13 +94,22 @@ func (p *Pointer) loadChild(ctx context.Context, ns *CborIpldStore) (*Node, erro
 		return p.cache, nil
 	}
 
-	var out Node
-	if err := ns.Get(ctx, p.Link, &out); err != nil {
+	out, err := LoadNode(ctx, ns, p.Link)
+	if err != nil {
 		return nil, err
 	}
 
-	p.cache = &out
-	out.store = ns
+	p.cache = out
+	return out, nil
+}
+
+func LoadNode(ctx context.Context, cs *CborIpldStore, c *cid.Cid) (*Node, error) {
+	var out Node
+	if err := cs.Get(ctx, c, &out); err != nil {
+		return nil, err
+	}
+
+	out.store = cs
 	return &out, nil
 }
 
