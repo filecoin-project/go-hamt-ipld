@@ -84,10 +84,22 @@ func (s *CborIpldStore) Get(ctx context.Context, c *cid.Cid, out interface{}) er
 
 var puts int
 
+type cidProvider interface {
+	Cid() *cid.Cid
+}
+
 func (s *CborIpldStore) Put(ctx context.Context, v interface{}) (*cid.Cid, error) {
 	puts++
 
-	nd, err := cbor.WrapObject(v, math.MaxUint64, -1)
+	mhType := uint64(math.MaxUint64)
+	mhLen := -1
+	if c, ok := v.(cidProvider); ok {
+		pref := c.Cid().Prefix()
+		mhType = pref.MhType
+		mhLen = pref.MhLength
+	}
+
+	nd, err := cbor.WrapObject(v, mhType, mhLen)
 	if err != nil {
 		return nil, err
 	}
