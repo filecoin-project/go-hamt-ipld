@@ -43,7 +43,7 @@ type CborIpldStore struct {
 
 type blocks interface {
 	GetBlock(context.Context, *cid.Cid) (block.Block, error)
-	AddBlock(block.Block) (*cid.Cid, error)
+	AddBlock(block.Block) error
 }
 
 type mockBlocks struct {
@@ -62,9 +62,9 @@ func (mb *mockBlocks) GetBlock(ctx context.Context, cid *cid.Cid) (block.Block, 
 	return nil, ErrNotFound
 }
 
-func (mb *mockBlocks) AddBlock(b block.Block) (*cid.Cid, error) {
+func (mb *mockBlocks) AddBlock(b block.Block) error {
 	mb.data[b.Cid().KeyString()] = b.RawData()
-	return b.Cid(), nil
+	return nil
 }
 
 func NewCborStore() *CborIpldStore {
@@ -104,10 +104,9 @@ func (s *CborIpldStore) Put(ctx context.Context, v interface{}) (*cid.Cid, error
 		return nil, err
 	}
 
-	c, err := s.Blocks.AddBlock(nd)
-	if err != nil {
+	if err := s.Blocks.AddBlock(nd); err != nil {
 		return nil, err
 	}
 
-	return c, nil
+	return nd.Cid(), nil
 }
