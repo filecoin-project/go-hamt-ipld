@@ -23,6 +23,7 @@ func NewNode(cs *CborIpldStore) *Node {
 	return &Node{
 		Bitfield: big.NewInt(0),
 		store:    cs,
+		Pointers: make([]*Pointer, 0),
 	}
 }
 
