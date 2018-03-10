@@ -324,7 +324,7 @@ func (n *Node) getChild(i byte) *Pointer {
 
 func (n *Node) Copy() *Node {
      nn := NewNode(n.store)
-     nn.Bitfield = big.NewInt(0).Set(n.Bitfield)
+     nn.Bitfield.Set(n.Bitfield)
      nn.Pointers = make([]*Pointer, len(n.Pointers))
 
 	for i, p := range n.Pointers {
