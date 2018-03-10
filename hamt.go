@@ -329,15 +329,21 @@ func (n *Node) Copy() *Node {
 	}
 
 	for i, p := range n.Pointers {
-		pp := nn.Pointers[i]
-		pp.Link = p.Link
+		pp := &Pointer{}
+		if p.Link != nil {
+			newCid := *p.Link
+			pp.Link = &newCid
+		}
 		pp.KVs = make([]*KV, len(p.KVs))
 		for j, kv := range p.KVs {
-			pp.KVs[j] = &KV{Key: kv.Key, Value: kv.Value}
+			val := make([]byte, len(kv.Value))
+			copy(val, kv.Value)
+			pp.KVs[j] = &KV{Key: kv.Key, Value: val}
 		}
+		nn.Pointers[i] = pp
 	}
 
-	return n
+	return nn
 }
 
 func (p *Pointer) isShard() bool {
