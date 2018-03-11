@@ -6,7 +6,7 @@ import (
 	"hash/fnv"
 	"math/big"
 
-	cid "gx/ipfs/QmcZfnkapfECQGcLZaf9B79NRg7cRa9EnZh4LSbkCzwNvY/go-cid"
+	cid "github.com/ipfs/go-cid"
 )
 
 const arrayWidth = 3
