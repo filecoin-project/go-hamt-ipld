@@ -11,11 +11,11 @@ import (
 		offline "github.com/ipfs/go-ipfs/exchange/offline"
 	*/
 
-	block "github.com/ipfs/go-block-format"
-	cbor "github.com/ipfs/go-ipld-cbor"
-	atlas "github.com/polydawn/refmt/obj/atlas"
+	cbor "gx/ipfs/QmRVSCwQtW1rjHCay9NqKXDwbtKTgDcN4iY7PrpSqfKM5D/go-ipld-cbor"
+	atlas "gx/ipfs/QmcrriCMhjb5ZWzmPNxmP53px47tSPcXBNaMtLdgcKFJYk/refmt/obj/atlas"
+	block "gx/ipfs/Qmej7nf81hi2x2tvjRBF3mcp74sQyuDH4VMYDGd1YtXjb2/go-block-format"
 	//ds "gx/ipfs/QmdHG8MAuARdGHxx4rPQASLcvhz24fzjSQq7AJRAQEorq5/go-datastore"
-	cid "github.com/ipfs/go-cid"
+	cid "gx/ipfs/QmcZfnkapfECQGcLZaf9B79NRg7cRa9EnZh4LSbkCzwNvY/go-cid"
 )
 
 // THIS IS ALL TEMPORARY CODE
