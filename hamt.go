@@ -329,10 +329,7 @@ func (n *Node) Copy() *Node {
 
 	for i, p := range n.Pointers {
 		pp := &Pointer{}
-		if p.Link != nil {
-			newCid := *p.Link
-			pp.Link = &newCid
-		}
+		pp.Link = p.Link
 		pp.KVs = make([]*KV, len(p.KVs))
 		for j, kv := range p.KVs {
 			val := make([]byte, len(kv.Value))
