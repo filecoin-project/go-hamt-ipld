@@ -175,3 +175,48 @@ func TestSetGet(t *testing.T) {
 		}
 	}
 }
+
+func nodesEqual(t *testing.T, store *CborIpldStore, n1, n2 *Node) bool {
+	ctx := context.Background()
+	err := n1.Flush(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n1Cid, err := store.Put(ctx, n1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = n2.Flush(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n2Cid, err := store.Put(ctx, n2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n1Cid.Equals(n2Cid)
+}
+
+func TestCopy(t *testing.T) {
+	ctx := context.Background()
+	cs := NewCborStore()
+
+	n := NewNode(cs)
+	nc := n.Copy()
+	if !nodesEqual(t, cs, n, nc) {
+		t.Fatal("nodes should be equal")
+	}
+	n.Set(ctx, "key", []byte{0x01})
+	if nodesEqual(t, cs, n, nc) {
+		t.Fatal("nodes should not be equal -- we set a key on n")
+	}
+	nc = n.Copy()
+	nc.Set(ctx, "key2", []byte{0x02})
+	if nodesEqual(t, cs, n, nc) {
+		t.Fatal("nodes should not be equal -- we set a key on nc")
+	}
+	n = nc.Copy()
+	if !nodesEqual(t, cs, n, nc) {
+		t.Fatal("nodes should be equal")
+	}
+}

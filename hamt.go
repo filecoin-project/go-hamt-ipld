@@ -23,6 +23,7 @@ func NewNode(cs *CborIpldStore) *Node {
 	return &Node{
 		Bitfield: big.NewInt(0),
 		store:    cs,
+		Pointers: make([]*Pointer, 0),
 	}
 }
 
@@ -322,22 +323,23 @@ func (n *Node) getChild(i byte) *Pointer {
 }
 
 func (n *Node) Copy() *Node {
-	nn := &Node{
-		store:    n.store,
-		Bitfield: big.NewInt(0).Set(n.Bitfield),
-		Pointers: make([]*Pointer, len(n.Pointers)),
-	}
+	nn := NewNode(n.store)
+	nn.Bitfield.Set(n.Bitfield)
+	nn.Pointers = make([]*Pointer, len(n.Pointers))
 
 	for i, p := range n.Pointers {
-		pp := nn.Pointers[i]
+		pp := &Pointer{}
 		pp.Link = p.Link
 		pp.KVs = make([]*KV, len(p.KVs))
 		for j, kv := range p.KVs {
-			pp.KVs[j] = &KV{Key: kv.Key, Value: kv.Value}
+			val := make([]byte, len(kv.Value))
+			copy(val, kv.Value)
+			pp.KVs[j] = &KV{Key: kv.Key, Value: val}
 		}
+		nn.Pointers[i] = pp
 	}
 
-	return n
+	return nn
 }
 
 func (p *Pointer) isShard() bool {
