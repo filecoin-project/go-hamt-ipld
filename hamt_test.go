@@ -206,7 +206,7 @@ func TestCopy(t *testing.T) {
 	if !nodesEqual(t, cs, n, nc) {
 		t.Fatal("nodes should be equal")
 	}
-	n.Set(ctx, "key", []byte{0x01})	
+	n.Set(ctx, "key", []byte{0x01})
 	if nodesEqual(t, cs, n, nc) {
 		t.Fatal("nodes should not be equal -- we set a key on n")
 	}
