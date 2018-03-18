@@ -41,7 +41,7 @@ type Pointer struct {
 }
 
 func hash(k string) []byte {
-	h := murmur3.New64()
+	h := murmur3.New128()
 	h.Write([]byte(k))
 	return h.Sum(nil)
 }
