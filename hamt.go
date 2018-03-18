@@ -6,7 +6,7 @@ import (
 	"math/big"
 
 	cid "github.com/ipfs/go-cid"
-	"gx/ipfs/QmfJHywXQu98UeZtGJBQrPAR6AtmDjjbe3qjTo9piXHPnx/murmur3"
+	murmur3 "github.com/spaolacci/murmur3"
 )
 
 const arrayWidth = 3
