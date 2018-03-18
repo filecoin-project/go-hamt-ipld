@@ -30,6 +30,72 @@ func dotGraph(n *Node) {
 	fmt.Println("}")
 }
 
+func TestCanonicalStructure(t *testing.T) {
+	ctx := context.Background()
+	vals := make(map[string][]byte)
+	keys := []string{"K"}
+	for i := 0; i < len(keys); i++ {
+		s := keys[i]
+		vals[s] = randValue()
+	}
+
+	cs := NewCborStore()
+	begn := NewNode(cs)
+	for _, k := range keys {
+		begn.Set(ctx, k, vals[k])
+	}
+
+	fmt.Println("start flush")
+	bef := time.Now()
+	if err := begn.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	fmt.Println("flush took: ", time.Since(bef), puts)
+	c, err := cs.Put(ctx, begn)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var n Node
+	if err := cs.Get(ctx, c, &n); err != nil {
+		t.Fatal(err)
+	}
+	n.store = cs
+
+	for k, v := range vals {
+		out, err := n.Find(ctx, k)
+		if err != nil {
+			t.Fatal("should have found the thing")
+		}
+		if !bytes.Equal(out, v) {
+			t.Fatal("got wrong value after value change")
+		}
+	}
+
+	// create second hamt by adding and deleting an element such that both mappings are on the top level
+	begn.Set(ctx, "A", randValue())
+	delerr := begn.Delete(ctx, "A")
+	if delerr != nil {
+		t.Fatal(delerr)
+	}
+	if err := begn.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	c2, err := cs.Put(ctx, begn)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var n2 Node
+	if err := cs.Get(ctx, c2, &n2); err != nil {
+		t.Fatal(err)
+	}
+	n2.store = cs
+	if !nodesEqual(t, cs, &n, &n2) {
+		t.Fatal("nodes should be equal")
+	}
+}
+
 func dotGraphRec(n *Node, name *int) {
 	cur := *name
 	for _, p := range n.Pointers {
