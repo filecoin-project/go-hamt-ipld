@@ -73,8 +73,9 @@ func TestCanonicalStructure(t *testing.T) {
 	}
 
 	// create second hamt by adding and deleting an element such that both mappings are on the top level
-	begn.Set(ctx, "A", randValue())
-	delerr := begn.Delete(ctx, "A")
+	k := "B"
+	begn.Set(ctx, k, randValue())
+	delerr := begn.Delete(ctx, k)
 	if delerr != nil {
 		t.Fatal(delerr)
 	}
