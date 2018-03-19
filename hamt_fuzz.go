@@ -61,7 +61,7 @@ func fuzzDotGraphRec(n *Node, name *int) {
 
 func Fuzz(data []byte) int {
 	if len(data) < 22+4 {
-		return -1
+		return 0
 	}
 	rand := mrand.New(mrand.NewSource(int64(binary.LittleEndian.Uint64(data))))
 	data = data[4:]
@@ -118,5 +118,5 @@ func Fuzz(data []byte) int {
 		panic("nodes not equal")
 	}
 
-	return 0
+	return 1
 }
