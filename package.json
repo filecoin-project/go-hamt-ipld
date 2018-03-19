@@ -12,6 +12,12 @@
       "hash": "QmRVSCwQtW1rjHCay9NqKXDwbtKTgDcN4iY7PrpSqfKM5D",
       "name": "go-ipld-cbor",
       "version": "1.3.1"
+    },
+    {
+      "author": "whyrusleeping",
+      "hash": "QmfJHywXQu98UeZtGJBQrPAR6AtmDjjbe3qjTo9piXHPnx",
+      "name": "murmur3",
+      "version": "0.0.0"
     }
   ],
   "gxVersion": "0.12.1",

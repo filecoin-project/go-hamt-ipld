@@ -3,10 +3,10 @@ package hamt
 import (
 	"context"
 	"fmt"
-	"hash/fnv"
 	"math/big"
 
 	cid "github.com/ipfs/go-cid"
+	murmur3 "github.com/spaolacci/murmur3"
 )
 
 const arrayWidth = 3
@@ -41,8 +41,9 @@ type Pointer struct {
 }
 
 func hash(k string) []byte {
-	s := fnv.New128a().Sum([]byte(k))
-	return s[:]
+	h := murmur3.New128()
+	h.Write([]byte(k))
+	return h.Sum(nil)
 }
 
 func (n *Node) Find(ctx context.Context, k string) ([]byte, error) {

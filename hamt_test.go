@@ -80,6 +80,14 @@ func stats(n *Node) (int, int, int, int) {
 	return totalnodes, totalkvs, pairs, triples
 }
 
+func TestHash(t *testing.T) {
+	h1 := hash("abcd")
+	h2 := hash("abce")
+	if h1[0] == h2[0] && h1[1] == h2[1] && h1[3] == h2[3] {
+		t.Fatal("Hash should give different strings different hash prefixes")
+	}
+}
+
 func TestSetGet(t *testing.T) {
 	ctx := context.Background()
 	vals := make(map[string][]byte)
