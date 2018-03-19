@@ -15,7 +15,7 @@ type Node struct {
 	Bitfield *big.Int   `refmt:"bf"`
 	Pointers []*Pointer `refmt:"p"`
 
-	// for fetching and storing chilren
+	// for fetching and storing children
 	store *CborIpldStore
 }
 
@@ -234,12 +234,10 @@ func (n *Node) modifyValue(ctx context.Context, hv []byte, depth int, k string, 
 	if v == nil {
 		for i, p := range child.KVs {
 			if p.Key == k {
-				/* this case is probably no longer needed
-				if len(child.KVs) == 2 {
-					child.KVs = []KV{child[(i+1)%2]}
-					return
+				if len(child.KVs) == 1 {
+					return n.rmChild(cindex, idx)
 				}
-				*/
+
 				copy(child.KVs[i:], child.KVs[i+1:])
 				child.KVs = child.KVs[:len(child.KVs)-1]
 				return nil
@@ -308,9 +306,10 @@ func (n *Node) setChild(i byte, p *Pointer) error {
 	return nil
 }
 
-func (n *Node) rmChild(i byte) error {
+func (n *Node) rmChild(i byte, idx int) error {
 	copy(n.Pointers[i:], n.Pointers[i+1:])
 	n.Pointers = n.Pointers[:len(n.Pointers)-1]
+	n.Bitfield.SetBit(n.Bitfield, idx, 0)
 
 	return nil
 }
