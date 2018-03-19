@@ -31,9 +31,13 @@ func dotGraph(n *Node) {
 }
 
 func TestCanonicalStructure(t *testing.T) {
+	addAndRemoveKeys(t, []string{"K"}, []string{"B"});
+	addAndRemoveKeys(t, []string{"K0", "K1", "KAA1", "KAA2", "KAA3"}, []string{"KAA4"});
+}
+
+func addAndRemoveKeys(t *testing.T, keys []string, extraKeys []string) {
 	ctx := context.Background()
 	vals := make(map[string][]byte)
-	keys := []string{"K"}
 	for i := 0; i < len(keys); i++ {
 		s := keys[i]
 		vals[s] = randValue()
@@ -72,13 +76,16 @@ func TestCanonicalStructure(t *testing.T) {
 		}
 	}
 
-	// create second hamt by adding and deleting an element such that both mappings are on the top level
-	k := "B"
-	begn.Set(ctx, k, randValue())
-	delerr := begn.Delete(ctx, k)
-	if delerr != nil {
-		t.Fatal(delerr)
+	// create second hamt by adding and deleting the extra keys
+	for i := 0; i < len(extraKeys); i++ {
+		begn.Set(ctx, extraKeys[i], randValue())
 	}
+	for i := 0; i < len(extraKeys); i++ {
+		if err := begn.Delete(ctx, extraKeys[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	if err := begn.Flush(ctx); err != nil {
 		t.Fatal(err)
 	}
