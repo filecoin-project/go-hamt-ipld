@@ -30,9 +30,19 @@ func dotGraph(n *Node) {
 	fmt.Println("}")
 }
 
+var identityHash = func(k string) []byte {
+	res := make([]byte, 32)
+	copy(res, []byte(k))
+	return res
+}
+
+var murmurHash = hash
+
 func TestCanonicalStructure(t *testing.T) {
+	hash = identityHash
 	addAndRemoveKeys(t, []string{"K"}, []string{"B"})
 	addAndRemoveKeys(t, []string{"K0", "K1", "KAA1", "KAA2", "KAA3"}, []string{"KAA4"})
+	hash = murmurHash
 }
 
 func addAndRemoveKeys(t *testing.T, keys []string, extraKeys []string) {

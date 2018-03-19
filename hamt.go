@@ -40,7 +40,7 @@ type Pointer struct {
 	cache *Node
 }
 
-func hash(k string) []byte {
+var hash = func(k string) []byte {
 	h := murmur3.New128()
 	h.Write([]byte(k))
 	return h.Sum(nil)
