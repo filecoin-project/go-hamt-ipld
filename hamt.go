@@ -330,11 +330,13 @@ func (n *Node) Copy() *Node {
 	for i, p := range n.Pointers {
 		pp := &Pointer{}
 		pp.Link = p.Link
-		pp.KVs = make([]*KV, len(p.KVs))
-		for j, kv := range p.KVs {
-			val := make([]byte, len(kv.Value))
-			copy(val, kv.Value)
-			pp.KVs[j] = &KV{Key: kv.Key, Value: val}
+		if p.KVs != nil {
+			pp.KVs = make([]*KV, len(p.KVs))
+			for j, kv := range p.KVs {
+				val := make([]byte, len(kv.Value))
+				copy(val, kv.Value)
+				pp.KVs[j] = &KV{Key: kv.Key, Value: val}
+			}
 		}
 		nn.Pointers[i] = pp
 	}

@@ -312,3 +312,21 @@ func TestCopy(t *testing.T) {
 		t.Fatal("nodes should be equal")
 	}
 }
+
+func TestCopyCopiesNilSlices(t *testing.T) {
+	cs := NewCborStore()
+
+	n := NewNode(cs)
+	pointer := &Pointer{}
+	n.Pointers = append(n.Pointers, pointer)
+
+	if n.Pointers[0].KVs != nil {
+		t.Fatal("Expected uninitialize slice to be nil")
+	}
+
+	nc := n.Copy()
+
+	if nc.Pointers[0].KVs != nil {
+		t.Fatal("Expected copied nil slices to be nil")
+	}
+}
