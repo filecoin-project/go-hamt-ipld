@@ -9,9 +9,9 @@
   "gxDependencies": [
     {
       "author": "whyrusleeping",
-      "hash": "QmRVSCwQtW1rjHCay9NqKXDwbtKTgDcN4iY7PrpSqfKM5D",
+      "hash": "QmRiRJhn427YVuufBEHofLreKWNw7P7BWNq86Sb9kzqdbd",
       "name": "go-ipld-cbor",
-      "version": "1.3.1"
+      "version": "1.4.1"
     },
     {
       "author": "whyrusleeping",
