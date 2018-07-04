@@ -21,7 +21,6 @@ import (
 // THIS IS ALL TEMPORARY CODE
 
 func init() {
-	cbor.RegisterCborType(cbor.BigIntAtlasEntry)
 	cbor.RegisterCborType(Node{})
 	cbor.RegisterCborType(Pointer{})
 

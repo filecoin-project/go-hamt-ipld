@@ -9,9 +9,9 @@
   "gxDependencies": [
     {
       "author": "whyrusleeping",
-      "hash": "QmRiRJhn427YVuufBEHofLreKWNw7P7BWNq86Sb9kzqdbd",
+      "hash": "QmcWjuCqrfAdtwChsnpHe9L1gvdYToCy8xLDY2KCdiTQiZ",
       "name": "go-ipld-cbor",
-      "version": "1.4.1"
+      "version": "1.3.2"
     },
     {
       "author": "whyrusleeping",
@@ -25,6 +25,6 @@
   "license": "",
   "name": "go-hamt-ipld",
   "releaseCmd": "git commit -a -m \"gx publish $VERSION\"",
-  "version": "0.0.8"
+  "version": "0.0.9"
 }
 
