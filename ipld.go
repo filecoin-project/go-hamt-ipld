@@ -11,16 +11,17 @@ import (
 		offline "github.com/ipfs/go-ipfs/exchange/offline"
 	*/
 
-	block "github.com/ipfs/go-block-format"
-	cbor "github.com/ipfs/go-ipld-cbor"
-	atlas "github.com/polydawn/refmt/obj/atlas"
+	cbor "gx/ipfs/QmTFrdeWRUR6ubMT71ngt1C5KwDbNYeGRWEPCDaZM66RD9/go-ipld-cbor"
+	block "gx/ipfs/QmVzK524a2VWLqyvtBeiHKsUAWYgeAk4DBeZoY7vpNPNRx/go-block-format"
+	atlas "gx/ipfs/QmcrriCMhjb5ZWzmPNxmP53px47tSPcXBNaMtLdgcKFJYk/refmt/obj/atlas"
 	//ds "gx/ipfs/QmdHG8MAuARdGHxx4rPQASLcvhz24fzjSQq7AJRAQEorq5/go-datastore"
-	cid "github.com/ipfs/go-cid"
+	cid "gx/ipfs/QmYVNvtQkeZ6AKSwDrjQTs432QtL6umrrK41EBq3cu7iSP/go-cid"
 )
 
 // THIS IS ALL TEMPORARY CODE
 
 func init() {
+        cbor.RegisterCborType(cbor.BigIntAtlasEntry)
 	cbor.RegisterCborType(Node{})
 	cbor.RegisterCborType(Pointer{})
 

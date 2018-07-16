@@ -9,15 +9,21 @@
   "gxDependencies": [
     {
       "author": "whyrusleeping",
-      "hash": "QmcWjuCqrfAdtwChsnpHe9L1gvdYToCy8xLDY2KCdiTQiZ",
+      "hash": "QmTFrdeWRUR6ubMT71ngt1C5KwDbNYeGRWEPCDaZM66RD9",
       "name": "go-ipld-cbor",
-      "version": "1.3.2"
+      "version": "1.4.5"
     },
     {
       "author": "whyrusleeping",
       "hash": "QmfJHywXQu98UeZtGJBQrPAR6AtmDjjbe3qjTo9piXHPnx",
       "name": "murmur3",
       "version": "0.0.0"
+    },
+    {
+      "author": "whyrusleeping",
+      "hash": "QmYVNvtQkeZ6AKSwDrjQTs432QtL6umrrK41EBq3cu7iSP",
+      "name": "go-cid",
+      "version": "0.7.22"
     }
   ],
   "gxVersion": "0.12.1",
@@ -25,6 +31,6 @@
   "license": "",
   "name": "go-hamt-ipld",
   "releaseCmd": "git commit -a -m \"gx publish $VERSION\"",
-  "version": "0.0.9"
+  "version": "0.0.11"
 }
 
