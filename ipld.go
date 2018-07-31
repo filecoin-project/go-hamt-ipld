@@ -11,7 +11,7 @@ import (
 		offline "github.com/ipfs/go-ipfs/exchange/offline"
 	*/
 
-	cbor "gx/ipfs/QmTFrdeWRUR6ubMT71ngt1C5KwDbNYeGRWEPCDaZM66RD9/go-ipld-cbor"
+	cbor "gx/ipfs/QmSyK1ZiAP98YvnxsTfQpb669V2xeTHRbG4Y6fgKS3vVSd/go-ipld-cbor"
 	block "gx/ipfs/QmVzK524a2VWLqyvtBeiHKsUAWYgeAk4DBeZoY7vpNPNRx/go-block-format"
 	atlas "gx/ipfs/QmcrriCMhjb5ZWzmPNxmP53px47tSPcXBNaMtLdgcKFJYk/refmt/obj/atlas"
 	//ds "gx/ipfs/QmdHG8MAuARdGHxx4rPQASLcvhz24fzjSQq7AJRAQEorq5/go-datastore"
