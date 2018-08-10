@@ -136,9 +136,20 @@ func dotGraphRec(n *Node, name *int) {
 	}
 }
 
-func stats(n *Node) (int, int, int, int) {
-	var totalnodes, totalkvs, pairs, triples int
-	totalnodes = 1
+type hamtStats struct {
+	totalNodes int
+	totalKvs   int
+	counts     map[int]int
+}
+
+func stats(n *Node) *hamtStats {
+	st := &hamtStats{counts: make(map[int]int)}
+	statsrec(n, st)
+	return st
+}
+
+func statsrec(n *Node, st *hamtStats) {
+	st.totalNodes++
 	for _, p := range n.Pointers {
 		if p.isShard() {
 			nd, err := p.loadChild(context.Background(), n.store)
@@ -146,22 +157,12 @@ func stats(n *Node) (int, int, int, int) {
 				panic(err)
 			}
 
-			t, k, two, three := stats(nd)
-			totalnodes += t
-			totalkvs += k
-			pairs += two
-			triples += three
+			statsrec(nd, st)
 		} else {
-			totalkvs += len(p.KVs)
-			switch len(p.KVs) {
-			case 2:
-				pairs++
-			case 3:
-				triples++
-			}
+			st.totalKvs += len(p.KVs)
+			st.counts[len(p.KVs)]++
 		}
 	}
-	return totalnodes, totalkvs, pairs, triples
 }
 
 func TestHash(t *testing.T) {
