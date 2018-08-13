@@ -21,7 +21,7 @@ import (
 // THIS IS ALL TEMPORARY CODE
 
 func init() {
-        cbor.RegisterCborType(cbor.BigIntAtlasEntry)
+	cbor.RegisterCborType(cbor.BigIntAtlasEntry)
 	cbor.RegisterCborType(Node{})
 	cbor.RegisterCborType(Pointer{})
 
@@ -83,15 +83,11 @@ func (s *CborIpldStore) Get(ctx context.Context, c *cid.Cid, out interface{}) er
 	return cbor.DecodeInto(blk.RawData(), out)
 }
 
-var puts int
-
 type cidProvider interface {
 	Cid() *cid.Cid
 }
 
 func (s *CborIpldStore) Put(ctx context.Context, v interface{}) (*cid.Cid, error) {
-	puts++
-
 	mhType := uint64(math.MaxUint64)
 	mhLen := -1
 	if c, ok := v.(cidProvider); ok {

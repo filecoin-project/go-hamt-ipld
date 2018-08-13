@@ -64,7 +64,7 @@ func addAndRemoveKeys(t *testing.T, keys []string, extraKeys []string) {
 	if err := begn.Flush(ctx); err != nil {
 		t.Fatal(err)
 	}
-	fmt.Println("flush took: ", time.Since(bef), puts)
+	fmt.Println("flush took: ", time.Since(bef))
 	c, err := cs.Put(ctx, begn)
 	if err != nil {
 		t.Fatal(err)
@@ -205,7 +205,7 @@ func TestSetGet(t *testing.T) {
 	if err := begn.Flush(ctx); err != nil {
 		t.Fatal(err)
 	}
-	fmt.Println("flush took: ", time.Since(bef), puts)
+	fmt.Println("flush took: ", time.Since(bef))
 	c, err := cs.Put(ctx, begn)
 	if err != nil {
 		t.Fatal(err)
