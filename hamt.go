@@ -329,6 +329,9 @@ func (n *Node) Copy() *Node {
 
 	for i, p := range n.Pointers {
 		pp := &Pointer{}
+		if p.cache != nil {
+			pp.cache = p.cache.Copy()
+		}
 		pp.Link = p.Link
 		if p.KVs != nil {
 			pp.KVs = make([]*KV, len(p.KVs))

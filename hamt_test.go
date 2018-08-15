@@ -331,3 +331,40 @@ func TestCopyCopiesNilSlices(t *testing.T) {
 		t.Fatal("Expected copied nil slices to be nil")
 	}
 }
+
+func TestCopyWithoutFlush(t *testing.T) {
+	ctx := context.Background()
+	cs := NewCborStore()
+
+	count := 200
+	n := NewNode(cs)
+	for i := 0; i < count; i++ {
+		n.Set(ctx, fmt.Sprintf("key%d", i), []byte{byte(i)})
+	}
+
+	n.Flush(ctx)
+
+	for i := 0; i < count; i++ {
+		n.Set(ctx, fmt.Sprintf("key%d", i), []byte{byte(count + i)})
+	}
+
+	nc := n.Copy()
+
+	for i := 0; i < count; i++ {
+		key := fmt.Sprintf("key%d", i)
+
+		val, err := n.Find(ctx, key)
+		if err != nil {
+			t.Fatalf("should have found key %s in original", key)
+		}
+
+		valCopy, err := nc.Find(ctx, key)
+		if err != nil {
+			t.Fatalf("should have found key %s in copy", key)
+		}
+
+		if val[0] != valCopy[0] {
+			t.Fatalf("copy does not equal original (%d != %d)", valCopy[0], val[0])
+		}
+	}
+}
