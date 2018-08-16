@@ -13,6 +13,7 @@ import (
 
 	cbor "gx/ipfs/QmSyK1ZiAP98YvnxsTfQpb669V2xeTHRbG4Y6fgKS3vVSd/go-ipld-cbor"
 	block "gx/ipfs/QmVzK524a2VWLqyvtBeiHKsUAWYgeAk4DBeZoY7vpNPNRx/go-block-format"
+	recbor "gx/ipfs/QmcrriCMhjb5ZWzmPNxmP53px47tSPcXBNaMtLdgcKFJYk/refmt/cbor"
 	atlas "gx/ipfs/QmcrriCMhjb5ZWzmPNxmP53px47tSPcXBNaMtLdgcKFJYk/refmt/obj/atlas"
 	//ds "gx/ipfs/QmdHG8MAuARdGHxx4rPQASLcvhz24fzjSQq7AJRAQEorq5/go-datastore"
 	cid "gx/ipfs/QmYVNvtQkeZ6AKSwDrjQTs432QtL6umrrK41EBq3cu7iSP/go-cid"
@@ -32,7 +33,7 @@ func init() {
 		atlas.MakeUnmarshalTransformFunc(func(v []interface{}) (KV, error) {
 			return KV{
 				Key:   v[0].(string),
-				Value: v[1].([]byte),
+				Value: v[1],
 			}, nil
 		})).Complete()
 	cbor.RegisterCborType(kvAtlasEntry)
@@ -40,6 +41,7 @@ func init() {
 
 type CborIpldStore struct {
 	Blocks blocks
+	Atlas  *atlas.Atlas
 }
 
 type blocks interface {
@@ -69,7 +71,7 @@ func (mb *mockBlocks) AddBlock(b block.Block) error {
 }
 
 func NewCborStore() *CborIpldStore {
-	return &CborIpldStore{newMockBlocks()}
+	return &CborIpldStore{Blocks: newMockBlocks()}
 }
 
 func (s *CborIpldStore) Get(ctx context.Context, c *cid.Cid, out interface{}) error {
@@ -80,7 +82,12 @@ func (s *CborIpldStore) Get(ctx context.Context, c *cid.Cid, out interface{}) er
 	if err != nil {
 		return err
 	}
-	return cbor.DecodeInto(blk.RawData(), out)
+
+	if s.Atlas == nil {
+		return cbor.DecodeInto(blk.RawData(), out)
+	} else {
+		return recbor.UnmarshalAtlased(blk.RawData(), out, *s.Atlas)
+	}
 }
 
 type cidProvider interface {

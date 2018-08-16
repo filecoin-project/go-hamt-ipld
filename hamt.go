@@ -22,14 +22,14 @@ type Node struct {
 func NewNode(cs *CborIpldStore) *Node {
 	return &Node{
 		Bitfield: big.NewInt(0),
-		store:    cs,
 		Pointers: make([]*Pointer, 0),
+		store:    cs,
 	}
 }
 
 type KV struct {
 	Key   string
-	Value []byte
+	Value interface{}
 }
 
 type Pointer struct {
@@ -46,8 +46,8 @@ var hash = func(k string) []byte {
 	return h.Sum(nil)
 }
 
-func (n *Node) Find(ctx context.Context, k string) ([]byte, error) {
-	var out []byte
+func (n *Node) Find(ctx context.Context, k string) (interface{}, error) {
+	var out interface{}
 	err := n.getValue(ctx, hash(k), 0, k, func(kv *KV) error {
 		out = kv.Value
 		return nil
@@ -163,7 +163,7 @@ func (n *Node) Flush(ctx context.Context) error {
 	return nil
 }
 
-func (n *Node) Set(ctx context.Context, k string, v []byte) error {
+func (n *Node) Set(ctx context.Context, k string, v interface{}) error {
 	return n.modifyValue(ctx, hash(k), 0, k, v)
 }
 
@@ -249,7 +249,7 @@ func (n *Node) modifyValue(ctx context.Context, hv []byte, depth int, k string, 
 	// check if key already exists
 	for _, p := range child.KVs {
 		if p.Key == k {
-			p.Value = v.([]byte)
+			p.Value = v
 			return nil
 		}
 	}
@@ -295,7 +295,7 @@ func (n *Node) insertChild(idx int, k string, v interface{}) error {
 	i := n.indexForBitPos(idx)
 	n.Bitfield.SetBit(n.Bitfield, idx, 1)
 
-	p := &Pointer{KVs: []*KV{{Key: k, Value: v.([]byte)}}}
+	p := &Pointer{KVs: []*KV{{Key: k, Value: v}}}
 
 	n.Pointers = append(n.Pointers[:i], append([]*Pointer{p}, n.Pointers[i:]...)...)
 	return nil
@@ -336,9 +336,7 @@ func (n *Node) Copy() *Node {
 		if p.KVs != nil {
 			pp.KVs = make([]*KV, len(p.KVs))
 			for j, kv := range p.KVs {
-				val := make([]byte, len(kv.Value))
-				copy(val, kv.Value)
-				pp.KVs[j] = &KV{Key: kv.Key, Value: val}
+				pp.KVs[j] = &KV{Key: kv.Key, Value: kv.Value}
 			}
 		}
 		nn.Pointers[i] = pp

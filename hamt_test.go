@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	cbor "gx/ipfs/QmSyK1ZiAP98YvnxsTfQpb669V2xeTHRbG4Y6fgKS3vVSd/go-ipld-cbor"
 )
 
 func randString() string {
@@ -81,7 +83,7 @@ func addAndRemoveKeys(t *testing.T, keys []string, extraKeys []string) {
 		if err != nil {
 			t.Fatal("should have found the thing")
 		}
-		if !bytes.Equal(out, v) {
+		if !bytes.Equal(out.([]byte), v) {
 			t.Fatal("got wrong value after value change")
 		}
 	}
@@ -223,7 +225,7 @@ func TestSetGet(t *testing.T) {
 		if err != nil {
 			t.Fatal("should have found the thing: ", err)
 		}
-		if !bytes.Equal(out, v) {
+		if !bytes.Equal(out.([]byte), v) {
 			t.Fatal("got wrong value")
 		}
 	}
@@ -247,7 +249,7 @@ func TestSetGet(t *testing.T) {
 		if err != nil {
 			t.Fatal("should have found the thing")
 		}
-		if !bytes.Equal(out, v) {
+		if !bytes.Equal(out.([]byte), v) {
 			t.Fatal("got wrong value after value change")
 		}
 	}
@@ -363,8 +365,48 @@ func TestCopyWithoutFlush(t *testing.T) {
 			t.Fatalf("should have found key %s in copy", key)
 		}
 
-		if val[0] != valCopy[0] {
-			t.Fatalf("copy does not equal original (%d != %d)", valCopy[0], val[0])
+		if val.([]byte)[0] != valCopy.([]byte)[0] {
+			t.Fatalf("copy does not equal original (%d != %d)", valCopy.([]byte)[0], val.([]byte)[0])
 		}
 	}
+}
+
+func TestValueLinking(t *testing.T) {
+	ctx := context.Background()
+	cs := NewCborStore()
+
+	thingy1 := map[string]string{"cat": "dog"}
+	c1, err := cs.Put(ctx, thingy1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	thingy2 := map[string]interface{}{
+		"one": c1,
+		"foo": "bar",
+	}
+
+	n := NewNode(cs)
+
+	if err := n.Set(ctx, "cat", thingy2); err != nil {
+		t.Fatal(err)
+	}
+
+	tcid, err := cs.Put(ctx, n)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	blk, err := cs.Blocks.GetBlock(ctx, tcid)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	nd, err := cbor.DecodeBlock(blk)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fmt.Println("thingy1", c1)
+	fmt.Println(nd.Links()[0])
 }
