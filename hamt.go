@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"math/big"
 
-	cid "gx/ipfs/QmYVNvtQkeZ6AKSwDrjQTs432QtL6umrrK41EBq3cu7iSP/go-cid"
-	murmur3 "gx/ipfs/QmfJHywXQu98UeZtGJBQrPAR6AtmDjjbe3qjTo9piXHPnx/murmur3"
+	cid "github.com/ipfs/go-cid"
+	murmur3 "github.com/spaolacci/murmur3"
 )
 
 const arrayWidth = 3

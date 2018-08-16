@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	cbor "gx/ipfs/QmSyK1ZiAP98YvnxsTfQpb669V2xeTHRbG4Y6fgKS3vVSd/go-ipld-cbor"
+	cbor "github.com/ipfs/go-ipld-cbor"
 )
 
 func randString() string {
