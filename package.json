@@ -31,6 +31,6 @@
   "license": "",
   "name": "go-hamt-ipld",
   "releaseCmd": "git commit -a -m \"gx publish $VERSION\"",
-  "version": "0.0.12"
+  "version": "0.0.13"
 }
 
