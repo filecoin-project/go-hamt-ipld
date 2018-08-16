@@ -276,7 +276,7 @@ func (n *Node) modifyValue(ctx context.Context, hv []byte, depth int, k string, 
 	}
 
 	// otherwise insert the new element into the array in order
-	np := &KV{Key: k, Value: v.([]byte)}
+	np := &KV{Key: k, Value: v}
 	for i := 0; i < len(child.KVs); i++ {
 		if k < child.KVs[i].Key {
 			child.KVs = append(child.KVs[:i], append([]*KV{np}, child.KVs[i:]...)...)
