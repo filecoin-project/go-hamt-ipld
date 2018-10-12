@@ -33,8 +33,8 @@ type KV struct {
 }
 
 type Pointer struct {
-	KVs  []*KV    `refmt:"v,omitempty"`
-	Link *cid.Cid `refmt:"l,omitempty"`
+	KVs  []*KV   `refmt:"v,omitempty"`
+	Link cid.Cid `refmt:"l,omitempty"`
 
 	// cached node to avoid too many serialization operations
 	cache *Node
@@ -105,7 +105,7 @@ func (p *Pointer) loadChild(ctx context.Context, ns *CborIpldStore) (*Node, erro
 	return out, nil
 }
 
-func LoadNode(ctx context.Context, cs *CborIpldStore, c *cid.Cid) (*Node, error) {
+func LoadNode(ctx context.Context, cs *CborIpldStore, c cid.Cid) (*Node, error) {
 	var out Node
 	if err := cs.Get(ctx, c, &out); err != nil {
 		return nil, err
@@ -346,5 +346,5 @@ func (n *Node) Copy() *Node {
 }
 
 func (p *Pointer) isShard() bool {
-	return p.Link != nil
+	return p.Link.Defined()
 }

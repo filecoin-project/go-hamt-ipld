@@ -45,20 +45,20 @@ type CborIpldStore struct {
 }
 
 type blocks interface {
-	GetBlock(context.Context, *cid.Cid) (block.Block, error)
+	GetBlock(context.Context, cid.Cid) (block.Block, error)
 	AddBlock(block.Block) error
 }
 
 type mockBlocks struct {
-	data map[string][]byte
+	data map[cid.Cid][]byte
 }
 
 func newMockBlocks() *mockBlocks {
-	return &mockBlocks{make(map[string][]byte)}
+	return &mockBlocks{make(map[cid.Cid][]byte)}
 }
 
-func (mb *mockBlocks) GetBlock(ctx context.Context, cid *cid.Cid) (block.Block, error) {
-	d, ok := mb.data[cid.KeyString()]
+func (mb *mockBlocks) GetBlock(ctx context.Context, cid cid.Cid) (block.Block, error) {
+	d, ok := mb.data[cid]
 	if ok {
 		return block.NewBlock(d), nil
 	}
@@ -66,7 +66,7 @@ func (mb *mockBlocks) GetBlock(ctx context.Context, cid *cid.Cid) (block.Block, 
 }
 
 func (mb *mockBlocks) AddBlock(b block.Block) error {
-	mb.data[b.Cid().KeyString()] = b.RawData()
+	mb.data[b.Cid()] = b.RawData()
 	return nil
 }
 
@@ -74,7 +74,7 @@ func NewCborStore() *CborIpldStore {
 	return &CborIpldStore{Blocks: newMockBlocks()}
 }
 
-func (s *CborIpldStore) Get(ctx context.Context, c *cid.Cid, out interface{}) error {
+func (s *CborIpldStore) Get(ctx context.Context, c cid.Cid, out interface{}) error {
 	ctx, cancel := context.WithTimeout(ctx, time.Second*10)
 	defer cancel()
 
@@ -91,10 +91,10 @@ func (s *CborIpldStore) Get(ctx context.Context, c *cid.Cid, out interface{}) er
 }
 
 type cidProvider interface {
-	Cid() *cid.Cid
+	Cid() cid.Cid
 }
 
-func (s *CborIpldStore) Put(ctx context.Context, v interface{}) (*cid.Cid, error) {
+func (s *CborIpldStore) Put(ctx context.Context, v interface{}) (cid.Cid, error) {
 	mhType := uint64(math.MaxUint64)
 	mhLen := -1
 	if c, ok := v.(cidProvider); ok {
@@ -105,11 +105,11 @@ func (s *CborIpldStore) Put(ctx context.Context, v interface{}) (*cid.Cid, error
 
 	nd, err := cbor.WrapObject(v, mhType, mhLen)
 	if err != nil {
-		return nil, err
+		return cid.Cid{}, err
 	}
 
 	if err := s.Blocks.AddBlock(nd); err != nil {
-		return nil, err
+		return cid.Cid{}, err
 	}
 
 	return nd.Cid(), nil
