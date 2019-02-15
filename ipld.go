@@ -86,7 +86,7 @@ func (s *CborIpldStore) Get(ctx context.Context, c cid.Cid, out interface{}) err
 	if s.Atlas == nil {
 		return cbor.DecodeInto(blk.RawData(), out)
 	} else {
-		return recbor.UnmarshalAtlased(blk.RawData(), out, *s.Atlas)
+		return recbor.UnmarshalAtlased(recbor.DecodeOptions{}, blk.RawData(), out, *s.Atlas)
 	}
 }
 
