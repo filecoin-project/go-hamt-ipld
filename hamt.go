@@ -63,8 +63,13 @@ func (n *Node) Delete(ctx context.Context, k string) error {
 }
 
 var ErrNotFound = fmt.Errorf("not found")
+var ErrMaxDepth = fmt.Errorf("attempted to traverse hamt beyond max depth")
 
 func (n *Node) getValue(ctx context.Context, hv []byte, depth int, k string, cb func(*KV) error) error {
+	if depth >= len(hv) {
+		return ErrMaxDepth
+	}
+
 	idx := hv[depth]
 	if n.Bitfield.Bit(int(idx)) == 0 {
 		return ErrNotFound
@@ -202,6 +207,9 @@ func (n *Node) cleanChild(chnd *Node, cindex byte) error {
 }
 
 func (n *Node) modifyValue(ctx context.Context, hv []byte, depth int, k string, v interface{}) error {
+	if depth >= len(hv) {
+		return ErrMaxDepth
+	}
 	idx := int(hv[depth])
 
 	if n.Bitfield.Bit(idx) != 1 {
