@@ -38,13 +38,57 @@ var identityHash = func(k string) []byte {
 	return res
 }
 
+var shortIdentityHash = func(k string) []byte {
+	res := make([]byte, 16)
+	copy(res, []byte(k))
+	return res
+}
+
 var murmurHash = hash
 
 func TestCanonicalStructure(t *testing.T) {
 	hash = identityHash
+	defer func() {
+		hash = murmurHash
+	}()
 	addAndRemoveKeys(t, []string{"K"}, []string{"B"})
 	addAndRemoveKeys(t, []string{"K0", "K1", "KAA1", "KAA2", "KAA3"}, []string{"KAA4"})
-	hash = murmurHash
+}
+
+func TestOverflow(t *testing.T) {
+	hash = identityHash
+	defer func() {
+		hash = murmurHash
+	}()
+	keys := make([]string, 4)
+	for i := range keys {
+		keys[i] = strings.Repeat("A", 32) + fmt.Sprintf("%d", i)
+	}
+
+	cs := NewCborStore()
+	n := NewNode(cs)
+	for _, k := range keys[:3] {
+		if err := n.Set(context.Background(), k, "foobar"); err != nil {
+			t.Error(err)
+		}
+	}
+
+	// Try forcing the depth beyond 32
+	if err := n.Set(context.Background(), keys[3], "bad"); err != ErrMaxDepth {
+		t.Errorf("expected error %q, got %q", ErrMaxDepth, err)
+	}
+
+	// Force _to_ max depth.
+	if err := n.Set(context.Background(), keys[3][1:], "bad"); err != nil {
+		t.Error(err)
+	}
+
+	// Now, try fetching with a shorter hash function.
+	hash = shortIdentityHash
+	_, err := n.Find(context.Background(), keys[0])
+	if err != ErrMaxDepth {
+		t.Errorf("expected error %q, got %q", ErrMaxDepth, err)
+	}
 }
 
 func addAndRemoveKeys(t *testing.T, keys []string, extraKeys []string) {
@@ -58,7 +102,9 @@ func addAndRemoveKeys(t *testing.T, keys []string, extraKeys []string) {
 	cs := NewCborStore()
 	begn := NewNode(cs)
 	for _, k := range keys {
-		begn.Set(ctx, k, vals[k])
+		if err := begn.Set(ctx, k, vals[k]); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	fmt.Println("start flush")
