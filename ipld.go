@@ -7,8 +7,8 @@ import (
 
 	/*
 		bstore "github.com/ipfs/go-ipfs/blocks/blockstore"
-		bserv "github.com/ipfs/go-ipfs/blockservice"
-		offline "github.com/ipfs/go-ipfs/exchange/offline"
+				bserv "github.com/ipfs/go-ipfs/blockservice"
+				offline "github.com/ipfs/go-ipfs/exchange/offline"
 	*/
 
 	block "github.com/ipfs/go-block-format"
@@ -47,6 +47,29 @@ type CborIpldStore struct {
 type blocks interface {
 	GetBlock(context.Context, cid.Cid) (block.Block, error)
 	AddBlock(block.Block) error
+}
+
+type Blockstore interface {
+	Get(cid.Cid) (block.Block, error)
+	Put(block.Block) error
+}
+
+type bswrapper struct {
+	bs Blockstore
+}
+
+func (bs *bswrapper) GetBlock(_ context.Context, c cid.Cid) (block.Block, error) {
+	return bs.bs.Get(c)
+}
+
+func (bs *bswrapper) AddBlock(blk block.Block) error {
+	return bs.bs.Put(blk)
+}
+
+func CSTFromBstore(bs Blockstore) *CborIpldStore {
+	return &CborIpldStore{
+		Blocks: &bswrapper{bs},
+	}
 }
 
 type mockBlocks struct {
