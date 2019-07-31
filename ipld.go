@@ -2,6 +2,7 @@ package hamt
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	cbor "github.com/ipfs/go-ipld-cbor"
 	recbor "github.com/polydawn/refmt/cbor"
 	atlas "github.com/polydawn/refmt/obj/atlas"
+
 	//ds "gx/ipfs/QmdHG8MAuARdGHxx4rPQASLcvhz24fzjSQq7AJRAQEorq5/go-datastore"
 	cid "github.com/ipfs/go-cid"
 )
@@ -120,10 +122,13 @@ type cidProvider interface {
 func (s *CborIpldStore) Put(ctx context.Context, v interface{}) (cid.Cid, error) {
 	mhType := uint64(math.MaxUint64)
 	mhLen := -1
+
+	var expCid cid.Cid
 	if c, ok := v.(cidProvider); ok {
 		pref := c.Cid().Prefix()
 		mhType = pref.MhType
 		mhLen = pref.MhLength
+		expCid = c.Cid()
 	}
 
 	nd, err := cbor.WrapObject(v, mhType, mhLen)
@@ -133,6 +138,10 @@ func (s *CborIpldStore) Put(ctx context.Context, v interface{}) (cid.Cid, error)
 
 	if err := s.Blocks.AddBlock(nd); err != nil {
 		return cid.Cid{}, err
+	}
+
+	if expCid != cid.Undef && nd.Cid() != expCid {
+		return cid.Undef, fmt.Errorf("your object is not being serialized the way it expects to")
 	}
 
 	return nd.Cid(), nil
