@@ -356,3 +356,25 @@ func (n *Node) Copy() *Node {
 func (p *Pointer) isShard() bool {
 	return p.Link.Defined()
 }
+
+func (n *Node) ForEach(ctx context.Context, f func(k string, val interface{}) error) error {
+	for _, p := range n.Pointers {
+		if p.isShard() {
+			chnd, err := p.loadChild(ctx, n.store)
+			if err != nil {
+				return err
+			}
+
+			if err := chnd.ForEach(ctx, f); err != nil {
+				return err
+			}
+		} else {
+			for _, kv := range p.KVs {
+				if err := f(kv.Key, kv.Value); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
