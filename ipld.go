@@ -26,7 +26,6 @@ import (
 
 // THIS IS ALL TEMPORARY CODE
 
-/*
 func init() {
 	cbor.RegisterCborType(cbor.BigIntAtlasEntry)
 	cbor.RegisterCborType(Node{})
@@ -44,7 +43,6 @@ func init() {
 		})).Complete()
 	cbor.RegisterCborType(kvAtlasEntry)
 }
-*/
 
 type CborIpldStore struct {
 	Blocks blocks
