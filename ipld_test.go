@@ -1,8 +1,13 @@
 package hamt
 
 import (
+	"bytes"
 	"context"
 	"testing"
+
+	cbg "github.com/whyrusleeping/cbor-gen"
+
+	cbor "github.com/ipfs/go-ipld-cbor"
 )
 
 func TestRoundtrip(t *testing.T) {
@@ -14,7 +19,8 @@ func TestRoundtrip(t *testing.T) {
 	n.Bitfield.SetBit(n.Bitfield, 7, 1)
 	n.Bitfield.SetBit(n.Bitfield, 18, 1)
 
-	n.Pointers = []*Pointer{{KVs: []*KV{{Key: "foo", Value: []byte("bar")}}}}
+	d := &cbg.Deferred{Raw: []byte{0x83, 0x01, 0x02, 0x03}}
+	n.Pointers = []*Pointer{{KVs: []*KV{{Key: "foo", Value: d}}}}
 
 	c, err := cs.Put(ctx, n)
 	if err != nil {
@@ -33,5 +39,22 @@ func TestRoundtrip(t *testing.T) {
 
 	if !c.Equals(c2) {
 		t.Fatal("cid mismatch")
+	}
+}
+
+func TestBasicBytesLoading(t *testing.T) {
+	b := []byte("cats and dogs are taking over")
+	o, err := cbor.DumpObject(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var out []byte
+	if err := cbor.DecodeInto(o, &out); err != nil {
+		t.Fatal(err)
+	}
+
+	if !bytes.Equal(out, b) {
+		t.Fatal("bytes round trip failed")
 	}
 }

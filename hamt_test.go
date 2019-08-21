@@ -85,8 +85,7 @@ func TestOverflow(t *testing.T) {
 
 	// Now, try fetching with a shorter hash function.
 	hash = shortIdentityHash
-	_, err := n.Find(context.Background(), keys[0])
-	if err != ErrMaxDepth {
+	if err := n.Find(context.Background(), keys[0], nil); err != ErrMaxDepth {
 		t.Errorf("expected error %q, got %q", ErrMaxDepth, err)
 	}
 }
@@ -125,12 +124,13 @@ func addAndRemoveKeys(t *testing.T, keys []string, extraKeys []string) {
 	n.store = cs
 
 	for k, v := range vals {
-		out, err := n.Find(ctx, k)
+		var out []byte
+		err := n.Find(ctx, k, &out)
 		if err != nil {
-			t.Fatal("should have found the thing")
+			t.Fatalf("should have found the thing (err: %s)", err)
 		}
-		if !bytes.Equal(out.([]byte), v) {
-			t.Fatal("got wrong value after value change")
+		if !bytes.Equal(out, v) {
+			t.Fatalf("got wrong value after value change: %x != %x", out, v)
 		}
 	}
 
@@ -221,6 +221,45 @@ func TestHash(t *testing.T) {
 	}
 }
 
+func TestBasic(t *testing.T) {
+	ctx := context.Background()
+	cs := NewCborStore()
+	begn := NewNode(cs)
+
+	val := []byte("cat dog bear")
+	if err := begn.Set(ctx, "foo", val); err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 1000; i++ {
+		if err := begn.Set(ctx, randString(), randValue()); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := begn.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	c, err := cs.Put(ctx, begn)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := LoadNode(ctx, cs, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var out []byte
+	if err := n.Find(ctx, "foo", &out); err != nil {
+		t.Fatal(err)
+	}
+
+	if !bytes.Equal(out, val) {
+		t.Fatal("out bytes were wrong: ", out)
+	}
+}
+
 func TestSetGet(t *testing.T) {
 	ctx := context.Background()
 	vals := make(map[string][]byte)
@@ -234,7 +273,9 @@ func TestSetGet(t *testing.T) {
 	cs := NewCborStore()
 	begn := NewNode(cs)
 	for _, k := range keys {
-		begn.Set(ctx, k, vals[k])
+		if err := begn.Set(ctx, k, vals[k]); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	size, err := begn.checkSize(ctx)
@@ -266,19 +307,21 @@ func TestSetGet(t *testing.T) {
 	n.store = cs
 
 	bef = time.Now()
-	for k, v := range vals {
-		out, err := n.Find(ctx, k)
-		if err != nil {
+	//for k, v := range vals {
+	for _, k := range keys {
+		v := vals[k]
+		var out []byte
+		if err := n.Find(ctx, k, &out); err != nil {
 			t.Fatal("should have found the thing: ", err)
 		}
-		if !bytes.Equal(out.([]byte), v) {
+		if !bytes.Equal(out, v) {
 			t.Fatal("got wrong value")
 		}
 	}
 	fmt.Println("finds took: ", time.Since(bef))
 
 	for i := 0; i < 100; i++ {
-		_, err := n.Find(ctx, randString())
+		err := n.Find(ctx, randString(), nil)
 		if err != ErrNotFound {
 			t.Fatal("should have gotten ErrNotFound, instead got: ", err)
 		}
@@ -291,11 +334,12 @@ func TestSetGet(t *testing.T) {
 	}
 
 	for k, v := range vals {
-		out, err := n.Find(ctx, k)
+		var out []byte
+		err := n.Find(ctx, k, &out)
 		if err != nil {
 			t.Fatal("should have found the thing")
 		}
-		if !bytes.Equal(out.([]byte), v) {
+		if !bytes.Equal(out, v) {
 			t.Fatal("got wrong value after value change")
 		}
 	}
@@ -311,7 +355,7 @@ func TestSetGet(t *testing.T) {
 		if err := n.Delete(ctx, k); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := n.Find(ctx, k); err != ErrNotFound {
+		if err := n.Find(ctx, k, nil); err != ErrNotFound {
 			t.Fatal("Expected ErrNotFound, got: ", err)
 		}
 	}
@@ -401,18 +445,18 @@ func TestCopyWithoutFlush(t *testing.T) {
 	for i := 0; i < count; i++ {
 		key := fmt.Sprintf("key%d", i)
 
-		val, err := n.Find(ctx, key)
-		if err != nil {
+		var val []byte
+		if err := n.Find(ctx, key, &val); err != nil {
 			t.Fatalf("should have found key %s in original", key)
 		}
 
-		valCopy, err := nc.Find(ctx, key)
-		if err != nil {
+		var valCopy []byte
+		if err := nc.Find(ctx, key, &valCopy); err != nil {
 			t.Fatalf("should have found key %s in copy", key)
 		}
 
-		if val.([]byte)[0] != valCopy.([]byte)[0] {
-			t.Fatalf("copy does not equal original (%d != %d)", valCopy.([]byte)[0], val.([]byte)[0])
+		if val[0] != valCopy[0] {
+			t.Fatalf("copy does not equal original (%d != %d)", valCopy[0], val[0])
 		}
 	}
 }
@@ -448,6 +492,7 @@ func TestValueLinking(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	fmt.Printf("BLOCK DATA: %x\n", blk.RawData())
 	nd, err := cbor.DecodeBlock(blk)
 	if err != nil {
 		t.Fatal(err)
