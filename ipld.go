@@ -1,8 +1,10 @@
 package hamt
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"math"
 	"time"
 
@@ -16,6 +18,7 @@ import (
 	cbor "github.com/ipfs/go-ipld-cbor"
 	recbor "github.com/polydawn/refmt/cbor"
 	atlas "github.com/polydawn/refmt/obj/atlas"
+	cbg "github.com/whyrusleeping/cbor-gen"
 
 	//ds "gx/ipfs/QmdHG8MAuARdGHxx4rPQASLcvhz24fzjSQq7AJRAQEorq5/go-datastore"
 	cid "github.com/ipfs/go-cid"
@@ -23,6 +26,7 @@ import (
 
 // THIS IS ALL TEMPORARY CODE
 
+/*
 func init() {
 	cbor.RegisterCborType(cbor.BigIntAtlasEntry)
 	cbor.RegisterCborType(Node{})
@@ -40,6 +44,7 @@ func init() {
 		})).Complete()
 	cbor.RegisterCborType(kvAtlasEntry)
 }
+*/
 
 type CborIpldStore struct {
 	Blocks blocks
@@ -99,6 +104,14 @@ func NewCborStore() *CborIpldStore {
 	return &CborIpldStore{Blocks: newMockBlocks()}
 }
 
+type cborMarshal interface {
+	MarshalCBOR(io.Writer) error
+}
+
+type cborUnmarshal interface {
+	UnmarshalCBOR(br cbg.ByteReader) error
+}
+
 func (s *CborIpldStore) Get(ctx context.Context, c cid.Cid, out interface{}) error {
 	ctx, cancel := context.WithTimeout(ctx, time.Second*10)
 	defer cancel()
@@ -106,6 +119,11 @@ func (s *CborIpldStore) Get(ctx context.Context, c cid.Cid, out interface{}) err
 	blk, err := s.Blocks.GetBlock(ctx, c)
 	if err != nil {
 		return err
+	}
+
+	cu, ok := out.(cborUnmarshal)
+	if ok {
+		return cu.UnmarshalCBOR(bytes.NewReader(blk.RawData()))
 	}
 
 	if s.Atlas == nil {
@@ -131,13 +149,31 @@ func (s *CborIpldStore) Put(ctx context.Context, v interface{}) (cid.Cid, error)
 		expCid = c.Cid()
 	}
 
+	cm, ok := v.(cborMarshal)
+	if ok {
+		buf := new(bytes.Buffer)
+		if err := cm.MarshalCBOR(buf); err != nil {
+			return cid.Undef, err
+		}
+		blk, err := block.NewBlockWithCid(buf.Bytes(), expCid)
+		if err != nil {
+			return cid.Undef, err
+		}
+
+		if err := s.Blocks.AddBlock(blk); err != nil {
+			return cid.Undef, err
+		}
+
+		return blk.Cid(), nil
+	}
+
 	nd, err := cbor.WrapObject(v, mhType, mhLen)
 	if err != nil {
-		return cid.Cid{}, err
+		return cid.Undef, err
 	}
 
 	if err := s.Blocks.AddBlock(nd); err != nil {
-		return cid.Cid{}, err
+		return cid.Undef, err
 	}
 
 	if expCid != cid.Undef && nd.Cid() != expCid {
