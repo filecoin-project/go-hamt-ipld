@@ -1,6 +1,7 @@
 package hamt
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math"
@@ -19,6 +20,7 @@ import (
 
 	//ds "gx/ipfs/QmdHG8MAuARdGHxx4rPQASLcvhz24fzjSQq7AJRAQEorq5/go-datastore"
 	cid "github.com/ipfs/go-cid"
+	cbg "github.com/whyrusleeping/cbor-gen"
 )
 
 // THIS IS ALL TEMPORARY CODE
@@ -108,6 +110,11 @@ func (s *CborIpldStore) Get(ctx context.Context, c cid.Cid, out interface{}) err
 		return err
 	}
 
+	cu, ok := out.(cbg.CBORUnmarshaler)
+	if ok {
+		return cu.UnmarshalCBOR(bytes.NewReader(blk.RawData()))
+	}
+
 	if s.Atlas == nil {
 		return cbor.DecodeInto(blk.RawData(), out)
 	} else {
@@ -131,13 +138,31 @@ func (s *CborIpldStore) Put(ctx context.Context, v interface{}) (cid.Cid, error)
 		expCid = c.Cid()
 	}
 
+	cm, ok := v.(cbg.CBORMarshaler)
+	if ok {
+		buf := new(bytes.Buffer)
+		if err := cm.MarshalCBOR(buf); err != nil {
+			return cid.Undef, err
+		}
+		blk, err := block.NewBlockWithCid(buf.Bytes(), expCid)
+		if err != nil {
+			return cid.Undef, err
+		}
+
+		if err := s.Blocks.AddBlock(blk); err != nil {
+			return cid.Undef, err
+		}
+
+		return blk.Cid(), nil
+	}
+
 	nd, err := cbor.WrapObject(v, mhType, mhLen)
 	if err != nil {
-		return cid.Cid{}, err
+		return cid.Undef, err
 	}
 
 	if err := s.Blocks.AddBlock(nd); err != nil {
-		return cid.Cid{}, err
+		return cid.Undef, err
 	}
 
 	if expCid != cid.Undef && nd.Cid() != expCid {
