@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"math"
 	"time"
 
@@ -18,10 +17,10 @@ import (
 	cbor "github.com/ipfs/go-ipld-cbor"
 	recbor "github.com/polydawn/refmt/cbor"
 	atlas "github.com/polydawn/refmt/obj/atlas"
-	cbg "github.com/whyrusleeping/cbor-gen"
 
 	//ds "gx/ipfs/QmdHG8MAuARdGHxx4rPQASLcvhz24fzjSQq7AJRAQEorq5/go-datastore"
 	cid "github.com/ipfs/go-cid"
+	cbg "github.com/whyrusleeping/cbor-gen"
 )
 
 // THIS IS ALL TEMPORARY CODE
@@ -102,14 +101,6 @@ func NewCborStore() *CborIpldStore {
 	return &CborIpldStore{Blocks: newMockBlocks()}
 }
 
-type cborMarshal interface {
-	MarshalCBOR(io.Writer) error
-}
-
-type cborUnmarshal interface {
-	UnmarshalCBOR(br cbg.ByteReader) error
-}
-
 func (s *CborIpldStore) Get(ctx context.Context, c cid.Cid, out interface{}) error {
 	ctx, cancel := context.WithTimeout(ctx, time.Second*10)
 	defer cancel()
@@ -119,7 +110,7 @@ func (s *CborIpldStore) Get(ctx context.Context, c cid.Cid, out interface{}) err
 		return err
 	}
 
-	cu, ok := out.(cborUnmarshal)
+	cu, ok := out.(cbg.CBORUnmarshaler)
 	if ok {
 		return cu.UnmarshalCBOR(bytes.NewReader(blk.RawData()))
 	}
@@ -147,7 +138,7 @@ func (s *CborIpldStore) Put(ctx context.Context, v interface{}) (cid.Cid, error)
 		expCid = c.Cid()
 	}
 
-	cm, ok := v.(cborMarshal)
+	cm, ok := v.(cbg.CBORMarshaler)
 	if ok {
 		buf := new(bytes.Buffer)
 		if err := cm.MarshalCBOR(buf); err != nil {
