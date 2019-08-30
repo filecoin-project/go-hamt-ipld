@@ -23,12 +23,22 @@ type Node struct {
 	store *CborIpldStore
 }
 
-func NewNode(cs *CborIpldStore) *Node {
-	return &Node{
+// Option is a function that configures the node
+type Option func(*Node)
+
+// NewNode creates a new IPLD HAMT Node with the given store and given
+// options
+func NewNode(cs *CborIpldStore, options ...Option) *Node {
+	nd := &Node{
 		Bitfield: big.NewInt(0),
 		Pointers: make([]*Pointer, 0),
 		store:    cs,
 	}
+	// apply functional options to node before using
+	for _, option := range options {
+		option(nd)
+	}
+	return nd
 }
 
 type KV struct {
@@ -121,13 +131,19 @@ func (p *Pointer) loadChild(ctx context.Context, ns *CborIpldStore) (*Node, erro
 	return out, nil
 }
 
-func LoadNode(ctx context.Context, cs *CborIpldStore, c cid.Cid) (*Node, error) {
+func LoadNode(ctx context.Context, cs *CborIpldStore, c cid.Cid, options ...Option) (*Node, error) {
 	var out Node
 	if err := cs.Get(ctx, c, &out); err != nil {
 		return nil, err
 	}
 
 	out.store = cs
+
+	// apply functional options to node before using
+	for _, option := range options {
+		option(&out)
+	}
+
 	return &out, nil
 }
 
