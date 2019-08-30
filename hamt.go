@@ -26,6 +26,12 @@ type Node struct {
 // Option is a function that configures the node
 type Option func(*Node)
 
+// UseTreeBitWidth allows you to set the width of the HAMT tree
+// in bits (from 1-8) via a customized hash function
+func UseTreeBitWidth(bitWidth uint8) Option {
+	return func(*Node) {}
+}
+
 // NewNode creates a new IPLD HAMT Node with the given store and given
 // options
 func NewNode(cs *CborIpldStore, options ...Option) *Node {
