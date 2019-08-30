@@ -1,12 +1,16 @@
 package hamt
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math/big"
 
 	cid "github.com/ipfs/go-cid"
+	cbor "github.com/ipfs/go-ipld-cbor"
 	murmur3 "github.com/spaolacci/murmur3"
+	cbg "github.com/whyrusleeping/cbor-gen"
+	xerrors "golang.org/x/xerrors"
 )
 
 const arrayWidth = 3
@@ -29,7 +33,7 @@ func NewNode(cs *CborIpldStore) *Node {
 
 type KV struct {
 	Key   string
-	Value interface{}
+	Value *cbg.Deferred
 }
 
 type Pointer struct {
@@ -46,16 +50,23 @@ var hash = func(k string) []byte {
 	return h.Sum(nil)
 }
 
-func (n *Node) Find(ctx context.Context, k string) (interface{}, error) {
-	var out interface{}
-	err := n.getValue(ctx, hash(k), 0, k, func(kv *KV) error {
-		out = kv.Value
+func (n *Node) Find(ctx context.Context, k string, out interface{}) error {
+	return n.getValue(ctx, hash(k), 0, k, func(kv *KV) error {
+		// used to just see if the thing exists in the set
+		if out == nil {
+			return nil
+		}
+
+		if um, ok := out.(cbg.CBORUnmarshaler); ok {
+			return um.UnmarshalCBOR(bytes.NewReader(kv.Value.Raw))
+		}
+
+		if err := cbor.DecodeInto(kv.Value.Raw, out); err != nil {
+			xerrors.Errorf("cbor decoding value: %w", err)
+		}
+
 		return nil
 	})
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 func (n *Node) Delete(ctx context.Context, k string) error {
@@ -169,7 +180,24 @@ func (n *Node) Flush(ctx context.Context) error {
 }
 
 func (n *Node) Set(ctx context.Context, k string, v interface{}) error {
-	return n.modifyValue(ctx, hash(k), 0, k, v)
+	var d *cbg.Deferred
+
+	cm, ok := v.(cbg.CBORMarshaler)
+	if ok {
+		buf := new(bytes.Buffer)
+		if err := cm.MarshalCBOR(buf); err != nil {
+			return err
+		}
+		d = &cbg.Deferred{Raw: buf.Bytes()}
+	} else {
+		b, err := cbor.DumpObject(v)
+		if err != nil {
+			return err
+		}
+		d = &cbg.Deferred{Raw: b}
+	}
+
+	return n.modifyValue(ctx, hash(k), 0, k, d)
 }
 
 func (n *Node) cleanChild(chnd *Node, cindex byte) error {
@@ -206,7 +234,7 @@ func (n *Node) cleanChild(chnd *Node, cindex byte) error {
 	}
 }
 
-func (n *Node) modifyValue(ctx context.Context, hv []byte, depth int, k string, v interface{}) error {
+func (n *Node) modifyValue(ctx context.Context, hv []byte, depth int, k string, v *cbg.Deferred) error {
 	if depth >= len(hv) {
 		return ErrMaxDepth
 	}
@@ -295,7 +323,7 @@ func (n *Node) modifyValue(ctx context.Context, hv []byte, depth int, k string, 
 	return nil
 }
 
-func (n *Node) insertChild(idx int, k string, v interface{}) error {
+func (n *Node) insertChild(idx int, k string, v *cbg.Deferred) error {
 	if v == nil {
 		return ErrNotFound
 	}

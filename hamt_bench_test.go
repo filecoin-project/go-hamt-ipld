@@ -87,8 +87,7 @@ func doBenchmarkEntriesCount(num int) func(b *testing.B) {
 				b.Fatal(err)
 			}
 
-			_, err = nd.Find(context.TODO(), keys[i%num])
-			if err != nil {
+			if err = nd.Find(context.TODO(), keys[i%num], nil); err != nil {
 				b.Fatal(err)
 			}
 		}

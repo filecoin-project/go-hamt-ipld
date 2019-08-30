@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"math"
 	"time"
 
 	/*
@@ -20,11 +19,13 @@ import (
 
 	//ds "gx/ipfs/QmdHG8MAuARdGHxx4rPQASLcvhz24fzjSQq7AJRAQEorq5/go-datastore"
 	cid "github.com/ipfs/go-cid"
+	mh "github.com/multiformats/go-multihash"
 	cbg "github.com/whyrusleeping/cbor-gen"
 )
 
 // THIS IS ALL TEMPORARY CODE
 
+/*
 func init() {
 	cbor.RegisterCborType(cbor.BigIntAtlasEntry)
 	cbor.RegisterCborType(Node{})
@@ -42,6 +43,7 @@ func init() {
 		})).Complete()
 	cbor.RegisterCborType(kvAtlasEntry)
 }
+*/
 
 type CborIpldStore struct {
 	Blocks blocks
@@ -127,14 +129,16 @@ type cidProvider interface {
 }
 
 func (s *CborIpldStore) Put(ctx context.Context, v interface{}) (cid.Cid, error) {
-	mhType := uint64(math.MaxUint64)
+	mhType := uint64(mh.BLAKE2B_MIN + 31)
 	mhLen := -1
+	codec := uint64(cid.DagCBOR)
 
 	var expCid cid.Cid
 	if c, ok := v.(cidProvider); ok {
 		pref := c.Cid().Prefix()
 		mhType = pref.MhType
 		mhLen = pref.MhLength
+		codec = pref.Codec
 		expCid = c.Cid()
 	}
 
@@ -144,7 +148,19 @@ func (s *CborIpldStore) Put(ctx context.Context, v interface{}) (cid.Cid, error)
 		if err := cm.MarshalCBOR(buf); err != nil {
 			return cid.Undef, err
 		}
-		blk, err := block.NewBlockWithCid(buf.Bytes(), expCid)
+
+		pref := cid.Prefix{
+			Codec:    codec,
+			MhType:   mhType,
+			MhLength: mhLen,
+			Version:  1,
+		}
+		c, err := pref.Sum(buf.Bytes())
+		if err != nil {
+			return cid.Undef, err
+		}
+
+		blk, err := block.NewBlockWithCid(buf.Bytes(), c)
 		if err != nil {
 			return cid.Undef, err
 		}
