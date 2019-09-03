@@ -8,7 +8,6 @@ import (
 
 	cid "github.com/ipfs/go-cid"
 	cbor "github.com/ipfs/go-ipld-cbor"
-	murmur3 "github.com/spaolacci/murmur3"
 	cbg "github.com/whyrusleeping/cbor-gen"
 	xerrors "golang.org/x/xerrors"
 )
@@ -58,12 +57,6 @@ type Pointer struct {
 
 	// cached node to avoid too many serialization operations
 	cache *Node
-}
-
-var hash = func(k string) []byte {
-	h := murmur3.New128()
-	h.Write([]byte(k))
-	return h.Sum(nil)
 }
 
 func (n *Node) Find(ctx context.Context, k string, out interface{}) error {
