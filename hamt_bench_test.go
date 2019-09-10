@@ -57,7 +57,7 @@ func BenchmarkFind(b *testing.B) {
 
 }
 
-func doBenchmarkEntriesCount(num int, bitWidth uint8) func(b *testing.B) {
+func doBenchmarkEntriesCount(num int, bitWidth int) func(b *testing.B) {
 	r := rander{rand.New(rand.NewSource(int64(num)))}
 	return func(b *testing.B) {
 		cs := NewCborStore()

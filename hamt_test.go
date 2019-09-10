@@ -51,10 +51,22 @@ func TestCanonicalStructure(t *testing.T) {
 	defer func() {
 		hash = murmurHash
 	}()
-	addAndRemoveKeys(t, []string{"K"}, []string{"B"})
-	addAndRemoveKeys(t, []string{"K0", "K1", "KAA1", "KAA2", "KAA3"}, []string{"KAA4"})
+	addAndRemoveKeys(t, defaultBitWidth, []string{"K"}, []string{"B"})
+	addAndRemoveKeys(t, defaultBitWidth, []string{"K0", "K1", "KAA1", "KAA2", "KAA3"}, []string{"KAA4"})
 }
 
+func TestCanonicalStructureAlternateBitWidth(t *testing.T) {
+	hash = identityHash
+	defer func() {
+		hash = murmurHash
+	}()
+	addAndRemoveKeys(t, 7, []string{"K"}, []string{"B"})
+	addAndRemoveKeys(t, 7, []string{"K0", "K1", "KAA1", "KAA2", "KAA3"}, []string{"KAA4"})
+	addAndRemoveKeys(t, 6, []string{"K"}, []string{"B"})
+	addAndRemoveKeys(t, 6, []string{"K0", "K1", "KAA1", "KAA2", "KAA3"}, []string{"KAA4"})
+	addAndRemoveKeys(t, 5, []string{"K"}, []string{"B"})
+	addAndRemoveKeys(t, 5, []string{"K0", "K1", "KAA1", "KAA2", "KAA3"}, []string{"KAA4"})
+}
 func TestOverflow(t *testing.T) {
 	hash = identityHash
 	defer func() {
@@ -90,7 +102,7 @@ func TestOverflow(t *testing.T) {
 	}
 }
 
-func addAndRemoveKeys(t *testing.T, keys []string, extraKeys []string) {
+func addAndRemoveKeys(t *testing.T, bitWidth int, keys []string, extraKeys []string) {
 	ctx := context.Background()
 	vals := make(map[string][]byte)
 	for i := 0; i < len(keys); i++ {
@@ -99,7 +111,7 @@ func addAndRemoveKeys(t *testing.T, keys []string, extraKeys []string) {
 	}
 
 	cs := NewCborStore()
-	begn := NewNode(cs)
+	begn := NewNode(cs, UseTreeBitWidth(bitWidth))
 	for _, k := range keys {
 		if err := begn.Set(ctx, k, vals[k]); err != nil {
 			t.Fatal(err)
@@ -122,7 +134,7 @@ func addAndRemoveKeys(t *testing.T, keys []string, extraKeys []string) {
 		t.Fatal(err)
 	}
 	n.store = cs
-
+	n.bitWidth = bitWidth
 	for k, v := range vals {
 		var out []byte
 		err := n.Find(ctx, k, &out)
@@ -157,6 +169,7 @@ func addAndRemoveKeys(t *testing.T, keys []string, extraKeys []string) {
 		t.Fatal(err)
 	}
 	n2.store = cs
+	n2.bitWidth = bitWidth
 	if !nodesEqual(t, cs, &n, &n2) {
 		t.Fatal("nodes should be equal")
 	}
@@ -168,7 +181,7 @@ func dotGraphRec(n *Node, name *int) {
 		if p.isShard() {
 			*name++
 			fmt.Printf("\tn%d -> n%d;\n", cur, *name)
-			nd, err := p.loadChild(context.Background(), n.store)
+			nd, err := p.loadChild(context.Background(), n.store, n.bitWidth)
 			if err != nil {
 				panic(err)
 			}
@@ -200,7 +213,7 @@ func statsrec(n *Node, st *hamtStats) {
 	st.totalNodes++
 	for _, p := range n.Pointers {
 		if p.isShard() {
-			nd, err := p.loadChild(context.Background(), n.store)
+			nd, err := p.loadChild(context.Background(), n.store, n.bitWidth)
 			if err != nil {
 				panic(err)
 			}
@@ -305,7 +318,7 @@ func TestSetGet(t *testing.T) {
 		t.Fatal(err)
 	}
 	n.store = cs
-
+	n.bitWidth = defaultBitWidth
 	bef = time.Now()
 	//for k, v := range vals {
 	for _, k := range keys {
