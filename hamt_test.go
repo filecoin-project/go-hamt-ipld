@@ -382,6 +382,26 @@ func nodesEqual(t *testing.T, store *CborIpldStore, n1, n2 *Node) bool {
 	return n1Cid.Equals(n2Cid)
 }
 
+func TestReloadEmpty(t *testing.T) {
+	ctx := context.Background()
+	cs := NewCborStore()
+
+	n := NewNode(cs)
+	c, err := cs.Put(ctx, n)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	on, err := LoadNode(ctx, cs, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := on.Set(ctx, "foo", "bar"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCopy(t *testing.T) {
 	ctx := context.Background()
 	cs := NewCborStore()

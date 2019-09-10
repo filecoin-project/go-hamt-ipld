@@ -83,6 +83,8 @@ func (t *Node) UnmarshalCBOR(br io.Reader) error {
 			return err
 		}
 		t.Bitfield = big.NewInt(0).SetBytes(buf)
+	} else {
+		t.Bitfield = big.NewInt(0)
 	}
 	// t.t.Pointers ([]*hamt.Pointer)
 
@@ -125,8 +127,7 @@ func (t *KV) MarshalCBOR(w io.Writer) error {
 		return err
 	}
 
-	// t.t.Value (typegen.Deferred)
-
+	// t.t.Value (cbg.Deferred)
 	if err := t.Value.MarshalCBOR(w); err != nil {
 		return err
 	}
@@ -149,28 +150,15 @@ func (t *KV) UnmarshalCBOR(br io.Reader) error {
 
 	// t.t.Key (string)
 
-	maj, extra, err = cbg.CborReadHeader(br)
-	if err != nil {
-		return err
-	}
-
-	if maj != cbg.MajTextString {
-		return fmt.Errorf("expected cbor type 'text string' in input")
-	}
-
-	if extra > 256*1024 {
-		return fmt.Errorf("string in cbor input too long")
-	}
-
 	{
-		buf := make([]byte, extra)
-		if _, err := io.ReadFull(br, buf); err != nil {
+		sval, err := cbg.ReadString(br)
+		if err != nil {
 			return err
 		}
 
-		t.Key = string(buf)
+		t.Key = string(sval)
 	}
-	// t.t.Value (typegen.Deferred)
+	// t.t.Value (cbg.Deferred)
 
 	t.Value = new(cbg.Deferred)
 

@@ -39,6 +39,8 @@ github.com/whyrusleeping/cbor-gen v0.0.0-20190822002707-4e02357de5c1 h1:wDIXmhgP
 github.com/whyrusleeping/cbor-gen v0.0.0-20190822002707-4e02357de5c1/go.mod h1:xdlJQaiqipF0HW+Mzpg7XRM3fWbGvfgFlcppuvlkIvY=
 github.com/whyrusleeping/cbor-gen v0.0.0-20190822231004-8db835b09a5a h1:9oEQR9eq2H2JDmglMcrCa+TxUEYy3HKSiNoLIkPNy/U=
 github.com/whyrusleeping/cbor-gen v0.0.0-20190822231004-8db835b09a5a/go.mod h1:xdlJQaiqipF0HW+Mzpg7XRM3fWbGvfgFlcppuvlkIvY=
+github.com/whyrusleeping/cbor-gen v0.0.0-20190910031516-c1cbffdb01bb h1:8yBVx6dgk1GfkiWOQ+RbeDDBLCOZxOtmZ949O2uj5H4=
+github.com/whyrusleeping/cbor-gen v0.0.0-20190910031516-c1cbffdb01bb/go.mod h1:xdlJQaiqipF0HW+Mzpg7XRM3fWbGvfgFlcppuvlkIvY=
 golang.org/x/crypto v0.0.0-20190211182817-74369b46fc67 h1:ng3VDlRp5/DHpSWl02R4rM9I+8M2rhmsuLwAMmkLQWE=
 golang.org/x/crypto v0.0.0-20190211182817-74369b46fc67/go.mod h1:6SG95UA2DQfeDnfUPMdvaQW0Q7yPrPDi9nlGo2tz2b4=
 golang.org/x/sys v0.0.0-20190219092855-153ac476189d h1:Z0Ahzd7HltpJtjAHHxX8QFP3j1yYgiuvjbjRzDj/KH0=

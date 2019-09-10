@@ -22,7 +22,6 @@ func main() {
 	t := []interface{}{
 		hamt.Node{},
 		hamt.KV{},
-		hamt.Pointer{},
 	}
 
 	for _, t := range t {
