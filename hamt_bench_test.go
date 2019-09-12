@@ -48,16 +48,20 @@ func BenchmarkSerializeNode(b *testing.B) {
 }
 
 func BenchmarkFind(b *testing.B) {
-	b.Run("find-10k", doBenchmarkEntriesCount(10000))
-	b.Run("find-100k", doBenchmarkEntriesCount(100000))
-	b.Run("find-1m", doBenchmarkEntriesCount(1000000))
+	b.Run("find-10k", doBenchmarkEntriesCount(10000, 8))
+	b.Run("find-100k", doBenchmarkEntriesCount(100000, 8))
+	b.Run("find-1m", doBenchmarkEntriesCount(1000000, 8))
+	b.Run("find-10k-bitwidth-5", doBenchmarkEntriesCount(10000, 5))
+	b.Run("find-100k-bitwidth-5", doBenchmarkEntriesCount(100000, 5))
+	b.Run("find-1m-bitwidth-5", doBenchmarkEntriesCount(1000000, 5))
+
 }
 
-func doBenchmarkEntriesCount(num int) func(b *testing.B) {
+func doBenchmarkEntriesCount(num int, bitWidth int) func(b *testing.B) {
 	r := rander{rand.New(rand.NewSource(int64(num)))}
 	return func(b *testing.B) {
 		cs := NewCborStore()
-		n := NewNode(cs)
+		n := NewNode(cs, UseTreeBitWidth(bitWidth))
 
 		var keys []string
 		for i := 0; i < num; i++ {
@@ -82,7 +86,7 @@ func doBenchmarkEntriesCount(num int) func(b *testing.B) {
 		b.ReportAllocs()
 
 		for i := 0; i < b.N; i++ {
-			nd, err := LoadNode(context.TODO(), cs, c)
+			nd, err := LoadNode(context.TODO(), cs, c, UseTreeBitWidth(bitWidth))
 			if err != nil {
 				b.Fatal(err)
 			}

@@ -8,27 +8,49 @@ import (
 
 	cid "github.com/ipfs/go-cid"
 	cbor "github.com/ipfs/go-ipld-cbor"
-	murmur3 "github.com/spaolacci/murmur3"
 	cbg "github.com/whyrusleeping/cbor-gen"
 	xerrors "golang.org/x/xerrors"
 )
 
 const arrayWidth = 3
+const defaultBitWidth = 8
 
 type Node struct {
 	Bitfield *big.Int   `refmt:"bf"`
 	Pointers []*Pointer `refmt:"p"`
 
 	// for fetching and storing children
-	store *CborIpldStore
+	store    *CborIpldStore
+	bitWidth int
 }
 
-func NewNode(cs *CborIpldStore) *Node {
-	return &Node{
+// Option is a function that configures the node
+type Option func(*Node)
+
+// UseTreeBitWidth allows you to set the width of the HAMT tree
+// in bits (from 1-8) via a customized hash function
+func UseTreeBitWidth(bitWidth int) Option {
+	return func(nd *Node) {
+		if bitWidth > 0 && bitWidth <= 8 {
+			nd.bitWidth = bitWidth
+		}
+	}
+}
+
+// NewNode creates a new IPLD HAMT Node with the given store and given
+// options
+func NewNode(cs *CborIpldStore, options ...Option) *Node {
+	nd := &Node{
 		Bitfield: big.NewInt(0),
 		Pointers: make([]*Pointer, 0),
 		store:    cs,
+		bitWidth: defaultBitWidth,
 	}
+	// apply functional options to node before using
+	for _, option := range options {
+		option(nd)
+	}
+	return nd
 }
 
 type KV struct {
@@ -44,14 +66,8 @@ type Pointer struct {
 	cache *Node
 }
 
-var hash = func(k string) []byte {
-	h := murmur3.New128()
-	h.Write([]byte(k))
-	return h.Sum(nil)
-}
-
 func (n *Node) Find(ctx context.Context, k string, out interface{}) error {
-	return n.getValue(ctx, hash(k), 0, k, func(kv *KV) error {
+	return n.getValue(ctx, &hashBits{b: hash(k)}, k, func(kv *KV) error {
 		// used to just see if the thing exists in the set
 		if out == nil {
 			return nil
@@ -70,32 +86,32 @@ func (n *Node) Find(ctx context.Context, k string, out interface{}) error {
 }
 
 func (n *Node) Delete(ctx context.Context, k string) error {
-	return n.modifyValue(ctx, hash(k), 0, k, nil)
+	return n.modifyValue(ctx, &hashBits{b: hash(k)}, k, nil)
 }
 
 var ErrNotFound = fmt.Errorf("not found")
 var ErrMaxDepth = fmt.Errorf("attempted to traverse hamt beyond max depth")
 
-func (n *Node) getValue(ctx context.Context, hv []byte, depth int, k string, cb func(*KV) error) error {
-	if depth >= len(hv) {
+func (n *Node) getValue(ctx context.Context, hv *hashBits, k string, cb func(*KV) error) error {
+	idx, err := hv.Next(n.bitWidth)
+	if err != nil {
 		return ErrMaxDepth
 	}
 
-	idx := hv[depth]
-	if n.Bitfield.Bit(int(idx)) == 0 {
+	if n.Bitfield.Bit(idx) == 0 {
 		return ErrNotFound
 	}
 
-	cindex := byte(n.indexForBitPos(int(idx)))
+	cindex := byte(n.indexForBitPos(idx))
 
 	c := n.getChild(cindex)
 	if c.isShard() {
-		chnd, err := c.loadChild(ctx, n.store)
+		chnd, err := c.loadChild(ctx, n.store, n.bitWidth)
 		if err != nil {
 			return err
 		}
 
-		return chnd.getValue(ctx, hv, depth+1, k, cb)
+		return chnd.getValue(ctx, hv, k, cb)
 	}
 
 	for _, kv := range c.KVs {
@@ -107,12 +123,13 @@ func (n *Node) getValue(ctx context.Context, hv []byte, depth int, k string, cb 
 	return ErrNotFound
 }
 
-func (p *Pointer) loadChild(ctx context.Context, ns *CborIpldStore) (*Node, error) {
+func (p *Pointer) loadChild(ctx context.Context, ns *CborIpldStore, bitWidth int) (*Node, error) {
 	if p.cache != nil {
 		return p.cache, nil
 	}
 
 	out, err := LoadNode(ctx, ns, p.Link)
+	out.bitWidth = bitWidth
 	if err != nil {
 		return nil, err
 	}
@@ -121,13 +138,19 @@ func (p *Pointer) loadChild(ctx context.Context, ns *CborIpldStore) (*Node, erro
 	return out, nil
 }
 
-func LoadNode(ctx context.Context, cs *CborIpldStore, c cid.Cid) (*Node, error) {
+func LoadNode(ctx context.Context, cs *CborIpldStore, c cid.Cid, options ...Option) (*Node, error) {
 	var out Node
 	if err := cs.Get(ctx, c, &out); err != nil {
 		return nil, err
 	}
 
 	out.store = cs
+	out.bitWidth = defaultBitWidth
+	// apply functional options to node before using
+	for _, option := range options {
+		option(&out)
+	}
+
 	return &out, nil
 }
 
@@ -145,7 +168,7 @@ func (n *Node) checkSize(ctx context.Context) (uint64, error) {
 	totsize := uint64(len(blk.RawData()))
 	for _, ch := range n.Pointers {
 		if ch.isShard() {
-			chnd, err := ch.loadChild(ctx, n.store)
+			chnd, err := ch.loadChild(ctx, n.store, n.bitWidth)
 			if err != nil {
 				return 0, err
 			}
@@ -197,7 +220,7 @@ func (n *Node) Set(ctx context.Context, k string, v interface{}) error {
 		d = &cbg.Deferred{Raw: b}
 	}
 
-	return n.modifyValue(ctx, hash(k), 0, k, d)
+	return n.modifyValue(ctx, &hashBits{b: hash(k)}, k, d)
 }
 
 func (n *Node) cleanChild(chnd *Node, cindex byte) error {
@@ -234,11 +257,11 @@ func (n *Node) cleanChild(chnd *Node, cindex byte) error {
 	}
 }
 
-func (n *Node) modifyValue(ctx context.Context, hv []byte, depth int, k string, v *cbg.Deferred) error {
-	if depth >= len(hv) {
+func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k string, v *cbg.Deferred) error {
+	idx, err := hv.Next(n.bitWidth)
+	if err != nil {
 		return ErrMaxDepth
 	}
-	idx := int(hv[depth])
 
 	if n.Bitfield.Bit(idx) != 1 {
 		return n.insertChild(idx, k, v)
@@ -248,12 +271,12 @@ func (n *Node) modifyValue(ctx context.Context, hv []byte, depth int, k string, 
 
 	child := n.getChild(cindex)
 	if child.isShard() {
-		chnd, err := child.loadChild(ctx, n.store)
+		chnd, err := child.loadChild(ctx, n.store, n.bitWidth)
 		if err != nil {
 			return err
 		}
 
-		if err := chnd.modifyValue(ctx, hv, depth+1, k, v); err != nil {
+		if err := chnd.modifyValue(ctx, hv, k, v); err != nil {
 			return err
 		}
 
@@ -293,12 +316,15 @@ func (n *Node) modifyValue(ctx context.Context, hv []byte, depth int, k string, 
 	// If the array is full, create a subshard and insert everything into it
 	if len(child.KVs) >= arrayWidth {
 		sub := NewNode(n.store)
-		if err := sub.modifyValue(ctx, hv, depth+1, k, v); err != nil {
+		sub.bitWidth = n.bitWidth
+		hvcopy := &hashBits{b: hv.b, consumed: hv.consumed}
+		if err := sub.modifyValue(ctx, hvcopy, k, v); err != nil {
 			return err
 		}
 
 		for _, p := range child.KVs {
-			if err := sub.modifyValue(ctx, hash(p.Key), depth+1, p.Key, p.Value); err != nil {
+			chhv := &hashBits{b: hash(p.Key), consumed: hv.consumed}
+			if err := sub.modifyValue(ctx, chhv, p.Key, p.Value); err != nil {
 				return err
 			}
 		}
@@ -360,6 +386,7 @@ func (n *Node) getChild(i byte) *Pointer {
 
 func (n *Node) Copy() *Node {
 	nn := NewNode(n.store)
+	nn.bitWidth = n.bitWidth
 	nn.Bitfield.Set(n.Bitfield)
 	nn.Pointers = make([]*Pointer, len(n.Pointers))
 
@@ -388,7 +415,7 @@ func (p *Pointer) isShard() bool {
 func (n *Node) ForEach(ctx context.Context, f func(k string, val interface{}) error) error {
 	for _, p := range n.Pointers {
 		if p.isShard() {
-			chnd, err := p.loadChild(ctx, n.store)
+			chnd, err := p.loadChild(ctx, n.store, n.bitWidth)
 			if err != nil {
 				return err
 			}
