@@ -25,26 +25,6 @@ import (
 
 // THIS IS ALL TEMPORARY CODE
 
-/*
-func init() {
-	cbor.RegisterCborType(cbor.BigIntAtlasEntry)
-	cbor.RegisterCborType(Node{})
-	cbor.RegisterCborType(Pointer{})
-
-	kvAtlasEntry := atlas.BuildEntry(KV{}).Transform().TransformMarshal(
-		atlas.MakeMarshalTransformFunc(func(kv KV) ([]interface{}, error) {
-			return []interface{}{kv.Key, kv.Value}, nil
-		})).TransformUnmarshal(
-		atlas.MakeUnmarshalTransformFunc(func(v []interface{}) (KV, error) {
-			return KV{
-				Key:   v[0].(string),
-				Value: v[1],
-			}, nil
-		})).Complete()
-	cbor.RegisterCborType(kvAtlasEntry)
-}
-*/
-
 type CborIpldStore struct {
 	Blocks blocks
 	Atlas  *atlas.Atlas
@@ -101,6 +81,10 @@ func (mb *mockBlocks) AddBlock(b block.Block) error {
 
 func NewCborStore() *CborIpldStore {
 	return &CborIpldStore{Blocks: newMockBlocks()}
+}
+
+func (s *CborIpldStore) GetBlock(ctx context.Context, c cid.Cid) (block.Block, error) {
+	return s.Blocks.GetBlock(ctx, c)
 }
 
 func (s *CborIpldStore) Get(ctx context.Context, c cid.Cid, out interface{}) error {
