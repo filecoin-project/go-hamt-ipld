@@ -20,7 +20,7 @@ type Node struct {
 	Pointers []*Pointer `refmt:"p"`
 
 	// for fetching and storing children
-	store    *CborIpldStore
+	store    CborIpldStore
 	bitWidth int
 }
 
@@ -39,7 +39,7 @@ func UseTreeBitWidth(bitWidth int) Option {
 
 // NewNode creates a new IPLD HAMT Node with the given store and given
 // options
-func NewNode(cs *CborIpldStore, options ...Option) *Node {
+func NewNode(cs CborIpldStore, options ...Option) *Node {
 	nd := &Node{
 		Bitfield: big.NewInt(0),
 		Pointers: make([]*Pointer, 0),
@@ -123,7 +123,7 @@ func (n *Node) getValue(ctx context.Context, hv *hashBits, k string, cb func(*KV
 	return ErrNotFound
 }
 
-func (p *Pointer) loadChild(ctx context.Context, ns *CborIpldStore, bitWidth int) (*Node, error) {
+func (p *Pointer) loadChild(ctx context.Context, ns CborIpldStore, bitWidth int) (*Node, error) {
 	if p.cache != nil {
 		return p.cache, nil
 	}
@@ -138,7 +138,7 @@ func (p *Pointer) loadChild(ctx context.Context, ns *CborIpldStore, bitWidth int
 	return out, nil
 }
 
-func LoadNode(ctx context.Context, cs *CborIpldStore, c cid.Cid, options ...Option) (*Node, error) {
+func LoadNode(ctx context.Context, cs CborIpldStore, c cid.Cid, options ...Option) (*Node, error) {
 	var out Node
 	if err := cs.Get(ctx, c, &out); err != nil {
 		return nil, err
@@ -160,7 +160,7 @@ func (n *Node) checkSize(ctx context.Context) (uint64, error) {
 		return 0, err
 	}
 
-	blk, err := n.store.Blocks.GetBlock(ctx, c)
+	blk, err := n.store.GetBlock(ctx, c)
 	if err != nil {
 		return 0, err
 	}

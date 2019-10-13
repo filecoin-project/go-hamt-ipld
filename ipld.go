@@ -45,10 +45,20 @@ func init() {
 }
 */
 
-type CborIpldStore struct {
+// CborIpldStore is the ipld store interface required by the hamt.
+type CborIpldStore interface {
+	Get(ctx context.Context, c cid.Cid, out interface{}) error
+	Put(ctx context.Context, v interface{}) (cid.Cid, error)
+	GetBlock(context.Context, cid.Cid) (block.Block, error)
+}
+
+// BasicCborIpldStore is a simple CborIpldStore made from wrapping a blockstore.
+type BasicCborIpldStore struct {
 	Blocks blocks
 	Atlas  *atlas.Atlas
 }
+
+var _ CborIpldStore = &BasicCborIpldStore{}
 
 type blocks interface {
 	GetBlock(context.Context, cid.Cid) (block.Block, error)
@@ -72,8 +82,8 @@ func (bs *bswrapper) AddBlock(blk block.Block) error {
 	return bs.bs.Put(blk)
 }
 
-func CSTFromBstore(bs Blockstore) *CborIpldStore {
-	return &CborIpldStore{
+func CSTFromBstore(bs Blockstore) *BasicCborIpldStore {
+	return &BasicCborIpldStore{
 		Blocks: &bswrapper{bs},
 	}
 }
@@ -99,11 +109,11 @@ func (mb *mockBlocks) AddBlock(b block.Block) error {
 	return nil
 }
 
-func NewCborStore() *CborIpldStore {
-	return &CborIpldStore{Blocks: newMockBlocks()}
+func NewCborStore() *BasicCborIpldStore {
+	return &BasicCborIpldStore{Blocks: newMockBlocks()}
 }
 
-func (s *CborIpldStore) Get(ctx context.Context, c cid.Cid, out interface{}) error {
+func (s *BasicCborIpldStore) Get(ctx context.Context, c cid.Cid, out interface{}) error {
 	ctx, cancel := context.WithTimeout(ctx, time.Second*10)
 	defer cancel()
 
@@ -128,7 +138,7 @@ type cidProvider interface {
 	Cid() cid.Cid
 }
 
-func (s *CborIpldStore) Put(ctx context.Context, v interface{}) (cid.Cid, error) {
+func (s *BasicCborIpldStore) Put(ctx context.Context, v interface{}) (cid.Cid, error) {
 	mhType := uint64(mh.BLAKE2B_MIN + 31)
 	mhLen := -1
 	codec := uint64(cid.DagCBOR)
@@ -186,4 +196,8 @@ func (s *CborIpldStore) Put(ctx context.Context, v interface{}) (cid.Cid, error)
 	}
 
 	return nd.Cid(), nil
+}
+
+func (s *BasicCborIpldStore) GetBlock(ctx context.Context, cid cid.Cid) (block.Block, error) {
+	return s.Blocks.GetBlock(ctx, cid)
 }
