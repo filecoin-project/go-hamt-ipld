@@ -50,6 +50,22 @@ type CborIpldStore struct {
 	Atlas  *atlas.Atlas
 }
 
+func NewSerializationError(err error) error {
+	return SerializationError{err}
+}
+
+type SerializationError struct {
+	err error
+}
+
+func (se SerializationError) Error() string {
+	return se.err.Error()
+}
+
+func (se SerializationError) Unwrap() error {
+	return se.err
+}
+
 type blocks interface {
 	GetBlock(context.Context, cid.Cid) (block.Block, error)
 	AddBlock(block.Block) error
@@ -114,7 +130,11 @@ func (s *CborIpldStore) Get(ctx context.Context, c cid.Cid, out interface{}) err
 
 	cu, ok := out.(cbg.CBORUnmarshaler)
 	if ok {
-		return cu.UnmarshalCBOR(bytes.NewReader(blk.RawData()))
+		if err := cu.UnmarshalCBOR(bytes.NewReader(blk.RawData())); err != nil {
+			return NewSerializationError(err)
+		}
+
+		return nil
 	}
 
 	if s.Atlas == nil {
@@ -146,7 +166,7 @@ func (s *CborIpldStore) Put(ctx context.Context, v interface{}) (cid.Cid, error)
 	if ok {
 		buf := new(bytes.Buffer)
 		if err := cm.MarshalCBOR(buf); err != nil {
-			return cid.Undef, err
+			return cid.Undef, NewSerializationError(err)
 		}
 
 		pref := cid.Prefix{

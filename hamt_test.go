@@ -273,6 +273,45 @@ func TestBasic(t *testing.T) {
 	}
 }
 
+func TestDelete(t *testing.T) {
+	ctx := context.Background()
+	cs := NewCborStore()
+	begn := NewNode(cs)
+
+	val := []byte("cat dog bear")
+	if err := begn.Set(ctx, "foo", val); err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 10; i++ {
+		if err := begn.Set(ctx, randString(), randValue()); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := begn.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	c, err := cs.Put(ctx, begn)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := LoadNode(ctx, cs, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := n.Delete(ctx, "foo"); err != nil {
+		t.Fatal(err)
+	}
+
+	var out []byte
+	if err := n.Find(ctx, "foo", &out); err == nil {
+		t.Fatal("shouldnt have found object")
+	}
+}
+
 func TestSetGet(t *testing.T) {
 	ctx := context.Background()
 	vals := make(map[string][]byte)
