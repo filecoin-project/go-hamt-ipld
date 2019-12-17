@@ -533,6 +533,44 @@ func TestCopyWithoutFlush(t *testing.T) {
 	}
 }
 
+func TestFindNodesForPath(t *testing.T) {
+	hash = identityHash
+	defer func() {
+		hash = murmurHash
+	}()
+
+	ctx := context.Background()
+	cs := NewCborStore()
+	begn := NewNode(cs, UseTreeBitWidth(2))
+
+	val := []byte("cat dog bear")
+	if err := begn.Set(ctx, "foo", val); err != nil {
+		t.Fatal(err)
+	}
+
+	path, err := begn.GetNodesForPath(ctx, "foo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(path) != 1 { // 1 entry with a bitwidth of 2 should have 1 node in the path
+		t.Fatalf("length of path %d, path: %v", len(path), path)
+	}
+
+	for i := 0; i < 1000; i++ {
+		if err := begn.Set(ctx, randString(), randValue()); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	path, err = begn.GetNodesForPath(ctx, "foo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(path) != 7 { // 1000 entries with a bitwidth of 2 and identity hash should have 5 nodes in the path
+		t.Fatalf("length of path %d, path: %v", len(path), path)
+	}
+}
+
 func TestValueLinking(t *testing.T) {
 	ctx := context.Background()
 	cs := NewCborStore()

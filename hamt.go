@@ -85,12 +85,42 @@ func (n *Node) Find(ctx context.Context, k string, out interface{}) error {
 	})
 }
 
+func (n *Node) GetNodesForPath(ctx context.Context, k string) ([]*Node, error) {
+	return n.getPath(ctx, &hashBits{b: hash(k)}, k, nil)
+}
+
 func (n *Node) Delete(ctx context.Context, k string) error {
 	return n.modifyValue(ctx, &hashBits{b: hash(k)}, k, nil)
 }
 
 var ErrNotFound = fmt.Errorf("not found")
 var ErrMaxDepth = fmt.Errorf("attempted to traverse hamt beyond max depth")
+
+func (n *Node) getPath(ctx context.Context, hv *hashBits, k string, path []*Node) ([]*Node, error) {
+	idx, err := hv.Next(n.bitWidth)
+	if err != nil {
+		return nil, ErrMaxDepth
+	}
+
+	path = append(path, n)
+
+	if n.Bitfield.Bit(idx) == 0 {
+		return path, ErrNotFound
+	}
+
+	cindex := byte(n.indexForBitPos(idx))
+
+	c := n.getChild(cindex)
+	if c.isShard() {
+		chnd, err := c.loadChild(ctx, n.store, n.bitWidth)
+		if err != nil {
+			return path, err
+		}
+		return chnd.getPath(ctx, hv, k, path)
+	}
+
+	return path, nil
+}
 
 func (n *Node) getValue(ctx context.Context, hv *hashBits, k string, cb func(*KV) error) error {
 	idx, err := hv.Next(n.bitWidth)
