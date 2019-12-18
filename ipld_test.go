@@ -3,9 +3,11 @@ package hamt
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"testing"
 
 	cbg "github.com/whyrusleeping/cbor-gen"
+	xerrors "golang.org/x/xerrors"
 
 	cbor "github.com/ipfs/go-ipld-cbor"
 )
@@ -56,5 +58,13 @@ func TestBasicBytesLoading(t *testing.T) {
 
 	if !bytes.Equal(out, b) {
 		t.Fatal("bytes round trip failed")
+	}
+}
+
+func TestIsSerializationError(t *testing.T) {
+	serr := NewSerializationError(fmt.Errorf("i am a cat"))
+
+	if !xerrors.Is(serr, &SerializationError{}) {
+		t.Fatal("its not a serialization error?")
 	}
 }

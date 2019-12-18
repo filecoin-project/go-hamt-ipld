@@ -66,6 +66,11 @@ func (se SerializationError) Unwrap() error {
 	return se.err
 }
 
+func (se SerializationError) Is(o error) bool {
+	_, ok := o.(*SerializationError)
+	return ok
+}
+
 type blocks interface {
 	GetBlock(context.Context, cid.Cid) (block.Block, error)
 	AddBlock(block.Block) error
