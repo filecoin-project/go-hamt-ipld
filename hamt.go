@@ -67,26 +67,30 @@ type Pointer struct {
 }
 
 func (n *Node) Find(ctx context.Context, k string, out interface{}) error {
-	return n.getValue(ctx, &hashBits{b: hash(k)}, k, func(kv *KV) error {
-		// used to just see if the thing exists in the set
-		if out == nil {
-			return nil
-		}
+	kv, _, err := n.getPathAndValue(ctx, &hashBits{b: hash(k)}, k, nil)
+	if err != nil {
+		return err
+	}
 
-		if um, ok := out.(cbg.CBORUnmarshaler); ok {
-			return um.UnmarshalCBOR(bytes.NewReader(kv.Value.Raw))
-		}
-
-		if err := cbor.DecodeInto(kv.Value.Raw, out); err != nil {
-			xerrors.Errorf("cbor decoding value: %w", err)
-		}
-
+	// used to just see if the thing exists in the set
+	if out == nil {
 		return nil
-	})
+	}
+
+	if um, ok := out.(cbg.CBORUnmarshaler); ok {
+		return um.UnmarshalCBOR(bytes.NewReader(kv.Value.Raw))
+	}
+
+	if err := cbor.DecodeInto(kv.Value.Raw, out); err != nil {
+		return xerrors.Errorf("cbor decoding value: %w", err)
+	}
+
+	return nil
 }
 
 func (n *Node) GetNodesForPath(ctx context.Context, k string) ([]*Node, error) {
-	return n.getPath(ctx, &hashBits{b: hash(k)}, k, nil)
+	_, nodes, err := n.getPathAndValue(ctx, &hashBits{b: hash(k)}, k, nil)
+	return nodes, err
 }
 
 func (n *Node) Delete(ctx context.Context, k string) error {
@@ -96,16 +100,16 @@ func (n *Node) Delete(ctx context.Context, k string) error {
 var ErrNotFound = fmt.Errorf("not found")
 var ErrMaxDepth = fmt.Errorf("attempted to traverse hamt beyond max depth")
 
-func (n *Node) getPath(ctx context.Context, hv *hashBits, k string, path []*Node) ([]*Node, error) {
+func (n *Node) getPathAndValue(ctx context.Context, hv *hashBits, k string, path []*Node) (*KV, []*Node, error) {
 	idx, err := hv.Next(n.bitWidth)
 	if err != nil {
-		return nil, ErrMaxDepth
+		return nil, nil, ErrMaxDepth
 	}
 
 	path = append(path, n)
 
 	if n.Bitfield.Bit(idx) == 0 {
-		return path, ErrNotFound
+		return nil, path, ErrNotFound
 	}
 
 	cindex := byte(n.indexForBitPos(idx))
@@ -114,43 +118,18 @@ func (n *Node) getPath(ctx context.Context, hv *hashBits, k string, path []*Node
 	if c.isShard() {
 		chnd, err := c.loadChild(ctx, n.store, n.bitWidth)
 		if err != nil {
-			return path, err
+			return nil, path, err
 		}
-		return chnd.getPath(ctx, hv, k, path)
-	}
-
-	return path, nil
-}
-
-func (n *Node) getValue(ctx context.Context, hv *hashBits, k string, cb func(*KV) error) error {
-	idx, err := hv.Next(n.bitWidth)
-	if err != nil {
-		return ErrMaxDepth
-	}
-
-	if n.Bitfield.Bit(idx) == 0 {
-		return ErrNotFound
-	}
-
-	cindex := byte(n.indexForBitPos(idx))
-
-	c := n.getChild(cindex)
-	if c.isShard() {
-		chnd, err := c.loadChild(ctx, n.store, n.bitWidth)
-		if err != nil {
-			return err
-		}
-
-		return chnd.getValue(ctx, hv, k, cb)
+		return chnd.getPathAndValue(ctx, hv, k, path)
 	}
 
 	for _, kv := range c.KVs {
 		if kv.Key == k {
-			return cb(kv)
+			return kv, path, err
 		}
 	}
 
-	return ErrNotFound
+	return nil, nil, ErrNotFound
 }
 
 func (p *Pointer) loadChild(ctx context.Context, ns *CborIpldStore, bitWidth int) (*Node, error) {
