@@ -8,7 +8,7 @@ import (
 // indexForBitPos returns the index within the collapsed array corresponding to
 // the given bit in the bitset.  The collapsed array contains only one entry
 // per bit set in the bitfield, and this function is used to map the indices.
-func (n *Node) indexForBitPos(bp int) int {
+func (n *Node) indexForBitPosOld(bp int) int {
 	// TODO: an optimization could reuse the same 'mask' here and change the size
 	//       as needed. This isnt yet done as the bitset package doesnt make it easy
 	//       to do.
@@ -26,4 +26,18 @@ func popCount(i *big.Int) int {
 		n += bits.OnesCount64(uint64(v))
 	}
 	return n
+}
+
+func (n *Node) indexForBitPos(bp int) int {
+	var x uint64
+	var count, i int
+	w := n.Bitfield.Bits()
+	for x = uint64(bp); x > 64 && i < len(w); x -= 64 {
+		count += bits.OnesCount64(uint64(w[i]))
+		i++
+	}
+	if i == len(w) {
+		return count
+	}
+	return count + bits.OnesCount64(uint64(w[i])&((1<<x)-1))
 }
