@@ -29,10 +29,10 @@ func popCount(i *big.Int) int {
 }
 
 func (n *Node) indexForBitPos(bp int) int {
-	var x uint64
+	var x uint
 	var count, i int
 	w := n.Bitfield.Bits()
-	for x = uint64(bp); x > 64 && i < len(w); x -= 64 {
+	for x = uint(bp); x > bits.UintSize && i < len(w); x -= bits.UintSize {
 		count += bits.OnesCount64(uint64(w[i]))
 		i++
 	}
