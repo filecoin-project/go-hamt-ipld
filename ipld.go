@@ -6,49 +6,15 @@ import (
 	"fmt"
 	"time"
 
-	/*
-		bstore "github.com/ipfs/go-ipfs/blocks/blockstore"
-				bserv "github.com/ipfs/go-ipfs/blockservice"
-				offline "github.com/ipfs/go-ipfs/exchange/offline"
-	*/
-
 	block "github.com/ipfs/go-block-format"
 	cbor "github.com/ipfs/go-ipld-cbor"
 	recbor "github.com/polydawn/refmt/cbor"
 	atlas "github.com/polydawn/refmt/obj/atlas"
 
-	//ds "gx/ipfs/QmdHG8MAuARdGHxx4rPQASLcvhz24fzjSQq7AJRAQEorq5/go-datastore"
 	cid "github.com/ipfs/go-cid"
 	mh "github.com/multiformats/go-multihash"
 	cbg "github.com/whyrusleeping/cbor-gen"
 )
-
-// THIS IS ALL TEMPORARY CODE
-
-/*
-func init() {
-	cbor.RegisterCborType(cbor.BigIntAtlasEntry)
-	cbor.RegisterCborType(Node{})
-	cbor.RegisterCborType(Pointer{})
-
-	kvAtlasEntry := atlas.BuildEntry(KV{}).Transform().TransformMarshal(
-		atlas.MakeMarshalTransformFunc(func(kv KV) ([]interface{}, error) {
-			return []interface{}{kv.Key, kv.Value}, nil
-		})).TransformUnmarshal(
-		atlas.MakeUnmarshalTransformFunc(func(v []interface{}) (KV, error) {
-			return KV{
-				Key:   v[0].(string),
-				Value: v[1],
-			}, nil
-		})).Complete()
-	cbor.RegisterCborType(kvAtlasEntry)
-}
-*/
-
-type CborIpldStore struct {
-	Blocks blocks
-	Atlas  *atlas.Atlas
-}
 
 func NewSerializationError(err error) error {
 	return SerializationError{err}
@@ -70,6 +36,20 @@ func (se SerializationError) Is(o error) bool {
 	_, ok := o.(*SerializationError)
 	return ok
 }
+
+// CborIpldStore is the ipld store interface required by the hamt.
+type CborIpldStore interface {
+	Get(ctx context.Context, c cid.Cid, out interface{}) error
+	Put(ctx context.Context, v interface{}) (cid.Cid, error)
+}
+
+// BasicCborIpldStore is a simple CborIpldStore made from wrapping a blockstore.
+type BasicCborIpldStore struct {
+	Blocks blocks
+	Atlas  *atlas.Atlas
+}
+
+var _ CborIpldStore = &BasicCborIpldStore{}
 
 type blocks interface {
 	GetBlock(context.Context, cid.Cid) (block.Block, error)
@@ -93,8 +73,8 @@ func (bs *bswrapper) AddBlock(blk block.Block) error {
 	return bs.bs.Put(blk)
 }
 
-func CSTFromBstore(bs Blockstore) *CborIpldStore {
-	return &CborIpldStore{
+func CSTFromBstore(bs Blockstore) *BasicCborIpldStore {
+	return &BasicCborIpldStore{
 		Blocks: &bswrapper{bs},
 	}
 }
@@ -120,11 +100,11 @@ func (mb *mockBlocks) AddBlock(b block.Block) error {
 	return nil
 }
 
-func NewCborStore() *CborIpldStore {
-	return &CborIpldStore{Blocks: newMockBlocks()}
+func NewCborStore() *BasicCborIpldStore {
+	return &BasicCborIpldStore{Blocks: newMockBlocks()}
 }
 
-func (s *CborIpldStore) Get(ctx context.Context, c cid.Cid, out interface{}) error {
+func (s *BasicCborIpldStore) Get(ctx context.Context, c cid.Cid, out interface{}) error {
 	ctx, cancel := context.WithTimeout(ctx, time.Second*10)
 	defer cancel()
 
@@ -138,7 +118,6 @@ func (s *CborIpldStore) Get(ctx context.Context, c cid.Cid, out interface{}) err
 		if err := cu.UnmarshalCBOR(bytes.NewReader(blk.RawData())); err != nil {
 			return NewSerializationError(err)
 		}
-
 		return nil
 	}
 
@@ -153,7 +132,7 @@ type cidProvider interface {
 	Cid() cid.Cid
 }
 
-func (s *CborIpldStore) Put(ctx context.Context, v interface{}) (cid.Cid, error) {
+func (s *BasicCborIpldStore) Put(ctx context.Context, v interface{}) (cid.Cid, error) {
 	mhType := uint64(mh.BLAKE2B_MIN + 31)
 	mhLen := -1
 	codec := uint64(cid.DagCBOR)
@@ -171,7 +150,7 @@ func (s *CborIpldStore) Put(ctx context.Context, v interface{}) (cid.Cid, error)
 	if ok {
 		buf := new(bytes.Buffer)
 		if err := cm.MarshalCBOR(buf); err != nil {
-			return cid.Undef, NewSerializationError(err)
+			return cid.Undef, err
 		}
 
 		pref := cid.Prefix{
@@ -211,4 +190,8 @@ func (s *CborIpldStore) Put(ctx context.Context, v interface{}) (cid.Cid, error)
 	}
 
 	return nd.Cid(), nil
+}
+
+func (s *BasicCborIpldStore) GetBlock(ctx context.Context, cid cid.Cid) (block.Block, error) {
+	return s.Blocks.GetBlock(ctx, cid)
 }

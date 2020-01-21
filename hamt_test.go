@@ -413,7 +413,7 @@ func TestSetGet(t *testing.T) {
 	}
 }
 
-func nodesEqual(t *testing.T, store *CborIpldStore, n1, n2 *Node) bool {
+func nodesEqual(t *testing.T, store CborIpldStore, n1, n2 *Node) bool {
 	ctx := context.Background()
 	err := n1.Flush(ctx)
 	if err != nil {
