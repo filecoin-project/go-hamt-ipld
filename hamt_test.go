@@ -10,10 +10,31 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ipfs/go-datastore"
-	blockstore "github.com/ipfs/go-ipfs-blockstore"
+	cid "github.com/ipfs/go-cid"
+	block "github.com/ipfs/go-block-format"
 	cbor "github.com/ipfs/go-ipld-cbor"
 )
+
+type mockBlocks struct {
+	data map[cid.Cid]block.Block
+}
+
+func newMockBlocks() *mockBlocks {
+	return &mockBlocks{make(map[cid.Cid]block.Block)}
+}
+
+func (mb *mockBlocks) Get(c cid.Cid) (block.Block, error) {
+	d, ok := mb.data[c]
+	if ok {
+		return d, nil
+	}
+	return nil, fmt.Errorf("Not Found")
+}
+
+func (mb *mockBlocks) Put(b block.Block) error {
+	mb.data[b.Cid()] = b
+	return nil
+}
 
 func randString() string {
 	buf := make([]byte, 18)
@@ -79,7 +100,7 @@ func TestOverflow(t *testing.T) {
 		keys[i] = strings.Repeat("A", 32) + fmt.Sprintf("%d", i)
 	}
 
-	cs := cbor.NewCborStore(blockstore.NewBlockstore(datastore.NewMapDatastore()))
+	cs := cbor.NewCborStore(newMockBlocks())
 	n := NewNode(cs)
 	for _, k := range keys[:3] {
 		if err := n.Set(context.Background(), k, "foobar"); err != nil {
@@ -112,7 +133,7 @@ func addAndRemoveKeys(t *testing.T, bitWidth int, keys []string, extraKeys []str
 		vals[s] = randValue()
 	}
 
-	cs := cbor.NewCborStore(blockstore.NewBlockstore(datastore.NewMapDatastore()))
+	cs := cbor.NewCborStore(newMockBlocks())
 	begn := NewNode(cs, UseTreeBitWidth(bitWidth))
 	for _, k := range keys {
 		if err := begn.Set(ctx, k, vals[k]); err != nil {
@@ -238,7 +259,7 @@ func TestHash(t *testing.T) {
 
 func TestBasic(t *testing.T) {
 	ctx := context.Background()
-	cs := cbor.NewCborStore(blockstore.NewBlockstore(datastore.NewMapDatastore()))
+	cs := cbor.NewCborStore(newMockBlocks())
 	begn := NewNode(cs)
 
 	val := []byte("cat dog bear")
@@ -277,7 +298,7 @@ func TestBasic(t *testing.T) {
 
 func TestDelete(t *testing.T) {
 	ctx := context.Background()
-	cs := cbor.NewCborStore(blockstore.NewBlockstore(datastore.NewMapDatastore()))
+	cs := cbor.NewCborStore(newMockBlocks())
 	begn := NewNode(cs)
 
 	val := []byte("cat dog bear")
@@ -324,7 +345,7 @@ func TestSetGet(t *testing.T) {
 		keys = append(keys, s)
 	}
 
-	cs := cbor.NewCborStore(blockstore.NewBlockstore(datastore.NewMapDatastore()))
+	cs := cbor.NewCborStore(newMockBlocks())
 	begn := NewNode(cs)
 	for _, k := range keys {
 		if err := begn.Set(ctx, k, vals[k]); err != nil {
@@ -415,7 +436,7 @@ func TestSetGet(t *testing.T) {
 	}
 }
 
-func nodesEqual(t *testing.T, store cbor.CborIpldStore, n1, n2 *Node) bool {
+func nodesEqual(t *testing.T, store cbor.IpldStore, n1, n2 *Node) bool {
 	ctx := context.Background()
 	err := n1.Flush(ctx)
 	if err != nil {
@@ -438,7 +459,7 @@ func nodesEqual(t *testing.T, store cbor.CborIpldStore, n1, n2 *Node) bool {
 
 func TestReloadEmpty(t *testing.T) {
 	ctx := context.Background()
-	cs := cbor.NewCborStore(blockstore.NewBlockstore(datastore.NewMapDatastore()))
+	cs := cbor.NewCborStore(newMockBlocks())
 
 	n := NewNode(cs)
 	c, err := cs.Put(ctx, n)
@@ -458,7 +479,7 @@ func TestReloadEmpty(t *testing.T) {
 
 func TestCopy(t *testing.T) {
 	ctx := context.Background()
-	cs := cbor.NewCborStore(blockstore.NewBlockstore(datastore.NewMapDatastore()))
+	cs := cbor.NewCborStore(newMockBlocks())
 
 	n := NewNode(cs)
 	nc := n.Copy()
@@ -481,7 +502,7 @@ func TestCopy(t *testing.T) {
 }
 
 func TestCopyCopiesNilSlices(t *testing.T) {
-	cs := cbor.NewCborStore(blockstore.NewBlockstore(datastore.NewMapDatastore()))
+	cs := cbor.NewCborStore(newMockBlocks())
 
 	n := NewNode(cs)
 	pointer := &Pointer{}
@@ -500,7 +521,7 @@ func TestCopyCopiesNilSlices(t *testing.T) {
 
 func TestCopyWithoutFlush(t *testing.T) {
 	ctx := context.Background()
-	cs := cbor.NewCborStore(blockstore.NewBlockstore(datastore.NewMapDatastore()))
+	cs := cbor.NewCborStore(newMockBlocks())
 
 	count := 200
 	n := NewNode(cs)
@@ -537,7 +558,7 @@ func TestCopyWithoutFlush(t *testing.T) {
 
 func TestValueLinking(t *testing.T) {
 	ctx := context.Background()
-	cs := cbor.NewCborStore(blockstore.NewBlockstore(datastore.NewMapDatastore()))
+	cs := cbor.NewCborStore(newMockBlocks())
 
 	thingy1 := map[string]string{"cat": "dog"}
 	c1, err := cs.Put(ctx, thingy1)
