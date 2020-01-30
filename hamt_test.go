@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ipfs/go-datastore"
+	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	cbor "github.com/ipfs/go-ipld-cbor"
 )
 
@@ -77,7 +79,7 @@ func TestOverflow(t *testing.T) {
 		keys[i] = strings.Repeat("A", 32) + fmt.Sprintf("%d", i)
 	}
 
-	cs := NewCborStore()
+	cs := cbor.NewCborStore(blockstore.NewBlockstore(datastore.NewMapDatastore()))
 	n := NewNode(cs)
 	for _, k := range keys[:3] {
 		if err := n.Set(context.Background(), k, "foobar"); err != nil {
@@ -110,7 +112,7 @@ func addAndRemoveKeys(t *testing.T, bitWidth int, keys []string, extraKeys []str
 		vals[s] = randValue()
 	}
 
-	cs := NewCborStore()
+	cs := cbor.NewCborStore(blockstore.NewBlockstore(datastore.NewMapDatastore()))
 	begn := NewNode(cs, UseTreeBitWidth(bitWidth))
 	for _, k := range keys {
 		if err := begn.Set(ctx, k, vals[k]); err != nil {
@@ -236,7 +238,7 @@ func TestHash(t *testing.T) {
 
 func TestBasic(t *testing.T) {
 	ctx := context.Background()
-	cs := NewCborStore()
+	cs := cbor.NewCborStore(blockstore.NewBlockstore(datastore.NewMapDatastore()))
 	begn := NewNode(cs)
 
 	val := []byte("cat dog bear")
@@ -275,7 +277,7 @@ func TestBasic(t *testing.T) {
 
 func TestDelete(t *testing.T) {
 	ctx := context.Background()
-	cs := NewCborStore()
+	cs := cbor.NewCborStore(blockstore.NewBlockstore(datastore.NewMapDatastore()))
 	begn := NewNode(cs)
 
 	val := []byte("cat dog bear")
@@ -322,7 +324,7 @@ func TestSetGet(t *testing.T) {
 		keys = append(keys, s)
 	}
 
-	cs := NewCborStore()
+	cs := cbor.NewCborStore(blockstore.NewBlockstore(datastore.NewMapDatastore()))
 	begn := NewNode(cs)
 	for _, k := range keys {
 		if err := begn.Set(ctx, k, vals[k]); err != nil {
@@ -413,7 +415,7 @@ func TestSetGet(t *testing.T) {
 	}
 }
 
-func nodesEqual(t *testing.T, store CborIpldStore, n1, n2 *Node) bool {
+func nodesEqual(t *testing.T, store cbor.CborIpldStore, n1, n2 *Node) bool {
 	ctx := context.Background()
 	err := n1.Flush(ctx)
 	if err != nil {
@@ -436,7 +438,7 @@ func nodesEqual(t *testing.T, store CborIpldStore, n1, n2 *Node) bool {
 
 func TestReloadEmpty(t *testing.T) {
 	ctx := context.Background()
-	cs := NewCborStore()
+	cs := cbor.NewCborStore(blockstore.NewBlockstore(datastore.NewMapDatastore()))
 
 	n := NewNode(cs)
 	c, err := cs.Put(ctx, n)
@@ -456,7 +458,7 @@ func TestReloadEmpty(t *testing.T) {
 
 func TestCopy(t *testing.T) {
 	ctx := context.Background()
-	cs := NewCborStore()
+	cs := cbor.NewCborStore(blockstore.NewBlockstore(datastore.NewMapDatastore()))
 
 	n := NewNode(cs)
 	nc := n.Copy()
@@ -479,7 +481,7 @@ func TestCopy(t *testing.T) {
 }
 
 func TestCopyCopiesNilSlices(t *testing.T) {
-	cs := NewCborStore()
+	cs := cbor.NewCborStore(blockstore.NewBlockstore(datastore.NewMapDatastore()))
 
 	n := NewNode(cs)
 	pointer := &Pointer{}
@@ -498,7 +500,7 @@ func TestCopyCopiesNilSlices(t *testing.T) {
 
 func TestCopyWithoutFlush(t *testing.T) {
 	ctx := context.Background()
-	cs := NewCborStore()
+	cs := cbor.NewCborStore(blockstore.NewBlockstore(datastore.NewMapDatastore()))
 
 	count := 200
 	n := NewNode(cs)
@@ -535,7 +537,7 @@ func TestCopyWithoutFlush(t *testing.T) {
 
 func TestValueLinking(t *testing.T) {
 	ctx := context.Background()
-	cs := NewCborStore()
+	cs := cbor.NewCborStore(blockstore.NewBlockstore(datastore.NewMapDatastore()))
 
 	thingy1 := map[string]string{"cat": "dog"}
 	c1, err := cs.Put(ctx, thingy1)
@@ -559,7 +561,7 @@ func TestValueLinking(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	blk, err := cs.Blocks.GetBlock(ctx, tcid)
+	blk, err := cs.Blocks.Get(tcid)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -7,6 +7,10 @@ import (
 	"math/rand"
 	"runtime"
 	"testing"
+
+	"github.com/ipfs/go-datastore"
+	blockstore "github.com/ipfs/go-ipfs-blockstore"
+	cbor "github.com/ipfs/go-ipld-cbor"
 )
 
 type rander struct {
@@ -28,7 +32,7 @@ func (r *rander) randValue() []byte {
 func BenchmarkSerializeNode(b *testing.B) {
 	r := rander{rand.New(rand.NewSource(1234))}
 
-	cs := NewCborStore()
+	cs := cbor.NewCborStore(blockstore.NewBlockstore(datastore.NewMapDatastore()))
 	n := NewNode(cs)
 
 	for i := 0; i < 50; i++ {
@@ -69,7 +73,7 @@ func BenchmarkSet(b *testing.B) {
 	for _, t := range table {
 		b.Run(fmt.Sprintf("%d/%d", t.count, t.bitwidth), func(b *testing.B) {
 			ctx := context.Background()
-			n := NewNode(NewCborStore(), UseTreeBitWidth(t.bitwidth))
+			n := NewNode(cbor.NewCborStore(blockstore.NewBlockstore(datastore.NewMapDatastore())), UseTreeBitWidth(t.bitwidth))
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				for j := 0; j < t.count; j++ {
@@ -95,7 +99,7 @@ func BenchmarkFind(b *testing.B) {
 func doBenchmarkEntriesCount(num int, bitWidth int) func(b *testing.B) {
 	r := rander{rand.New(rand.NewSource(int64(num)))}
 	return func(b *testing.B) {
-		cs := NewCborStore()
+		cs := cbor.NewCborStore(blockstore.NewBlockstore(datastore.NewMapDatastore()))
 		n := NewNode(cs, UseTreeBitWidth(bitWidth))
 
 		var keys []string

@@ -25,7 +25,7 @@ func main() {
 	}
 
 	for _, t := range t {
-		if err := cbg.GenTupleEncodersForType(t, fi); err != nil {
+		if err := cbg.GenTupleEncodersForType("hamt", t, fi); err != nil {
 			panic(err)
 		}
 	}
