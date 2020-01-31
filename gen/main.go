@@ -8,7 +8,7 @@ import (
 
 func main() {
 	// FIXME this will not generate the correct code, leave the cbor_gen.go file untouched.
-	if err := cbg.WriteMapEncodersToFile("cbor_gen.go", "hamt", hamt.Node{}, hamt.KV{}); err != nil {
+	if err := cbg.WriteTupleEncodersToFile("cbor_gen.go", "hamt", hamt.Node{}, hamt.KV{}); err != nil {
 		panic(err)
 	}
 
