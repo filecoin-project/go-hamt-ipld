@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	cid "github.com/ipfs/go-cid"
 	block "github.com/ipfs/go-block-format"
+	cid "github.com/ipfs/go-cid"
 	cbor "github.com/ipfs/go-ipld-cbor"
 )
 
