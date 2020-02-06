@@ -129,10 +129,10 @@ func (p *Pointer) loadChild(ctx context.Context, ns *CborIpldStore, bitWidth int
 	}
 
 	out, err := LoadNode(ctx, ns, p.Link)
-	out.bitWidth = bitWidth
 	if err != nil {
 		return nil, err
 	}
+	out.bitWidth = bitWidth
 
 	p.cache = out
 	return out, nil
