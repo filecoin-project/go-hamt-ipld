@@ -203,6 +203,12 @@ func (n *Node) Flush(ctx context.Context) error {
 	return nil
 }
 
+// SetRaw sets key k to cbor bytes raw
+func (n *Node) SetRaw(ctx context.Context, k string, raw []byte) error {
+	d := &cbg.Deferred{Raw: raw}
+	return n.modifyValue(ctx, &hashBits{b: hash(k)}, k, d)
+}
+
 func (n *Node) Set(ctx context.Context, k string, v interface{}) error {
 	var d *cbg.Deferred
 
