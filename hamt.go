@@ -86,6 +86,15 @@ func (n *Node) Find(ctx context.Context, k string, out interface{}) error {
 	})
 }
 
+func (n *Node) FindRaw(ctx context.Context, k string) ([]byte, error) {
+	var ret []byte
+	err := n.getValue(ctx, &hashBits{b: hash(k)}, k, func(kv *KV) error {
+		ret = kv.Value.Raw
+		return nil
+	})
+	return ret, err
+}
+
 func (n *Node) Delete(ctx context.Context, k string) error {
 	return n.modifyValue(ctx, &hashBits{b: hash(k)}, k, nil)
 }
