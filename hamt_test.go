@@ -55,15 +55,15 @@ func dotGraph(n *Node) {
 	fmt.Println("}")
 }
 
-var identityHash = func(k string) []byte {
+var identityHash = func(k []byte) []byte {
 	res := make([]byte, 32)
-	copy(res, []byte(k))
+	copy(res, k)
 	return res
 }
 
-var shortIdentityHash = func(k string) []byte {
+var shortIdentityHash = func(k []byte) []byte {
 	res := make([]byte, 16)
-	copy(res, []byte(k))
+	copy(res, k)
 	return res
 }
 
@@ -213,7 +213,7 @@ func dotGraphRec(n *Node, name *int) {
 		} else {
 			var names []string
 			for _, pt := range p.KVs {
-				names = append(names, pt.Key)
+				names = append(names, string(pt.Key))
 			}
 			fmt.Printf("\tn%d -> n%s;\n", cur, strings.Join(names, "_"))
 		}
@@ -250,8 +250,8 @@ func statsrec(n *Node, st *hamtStats) {
 }
 
 func TestHash(t *testing.T) {
-	h1 := hash("abcd")
-	h2 := hash("abce")
+	h1 := hash([]byte("abcd"))
+	h2 := hash([]byte("abce"))
 	if h1[0] == h2[0] && h1[1] == h2[1] && h1[3] == h2[3] {
 		t.Fatal("Hash should give different strings different hash prefixes")
 	}

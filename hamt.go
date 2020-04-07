@@ -55,7 +55,7 @@ func NewNode(cs cbor.IpldStore, options ...Option) *Node {
 }
 
 type KV struct {
-	Key   string
+	Key   []byte
 	Value *cbg.Deferred
 }
 
@@ -68,7 +68,7 @@ type Pointer struct {
 }
 
 func (n *Node) Find(ctx context.Context, k string, out interface{}) error {
-	return n.getValue(ctx, &hashBits{b: hash(k)}, k, func(kv *KV) error {
+	return n.getValue(ctx, &hashBits{b: hash([]byte(k))}, k, func(kv *KV) error {
 		// used to just see if the thing exists in the set
 		if out == nil {
 			return nil
@@ -88,7 +88,7 @@ func (n *Node) Find(ctx context.Context, k string, out interface{}) error {
 
 func (n *Node) FindRaw(ctx context.Context, k string) ([]byte, error) {
 	var ret []byte
-	err := n.getValue(ctx, &hashBits{b: hash(k)}, k, func(kv *KV) error {
+	err := n.getValue(ctx, &hashBits{b: hash([]byte(k))}, k, func(kv *KV) error {
 		ret = kv.Value.Raw
 		return nil
 	})
@@ -96,7 +96,8 @@ func (n *Node) FindRaw(ctx context.Context, k string) ([]byte, error) {
 }
 
 func (n *Node) Delete(ctx context.Context, k string) error {
-	return n.modifyValue(ctx, &hashBits{b: hash(k)}, k, nil)
+	kb := []byte(k)
+	return n.modifyValue(ctx, &hashBits{b: hash(kb)}, kb, nil)
 }
 
 var ErrNotFound = fmt.Errorf("not found")
@@ -125,7 +126,7 @@ func (n *Node) getValue(ctx context.Context, hv *hashBits, k string, cb func(*KV
 	}
 
 	for _, kv := range c.KVs {
-		if kv.Key == k {
+		if string(kv.Key) == k {
 			return cb(kv)
 		}
 	}
@@ -215,11 +216,14 @@ func (n *Node) Flush(ctx context.Context) error {
 // SetRaw sets key k to cbor bytes raw
 func (n *Node) SetRaw(ctx context.Context, k string, raw []byte) error {
 	d := &cbg.Deferred{Raw: raw}
-	return n.modifyValue(ctx, &hashBits{b: hash(k)}, k, d)
+	kb := []byte(k)
+	return n.modifyValue(ctx, &hashBits{b: hash(kb)}, kb, d)
 }
 
 func (n *Node) Set(ctx context.Context, k string, v interface{}) error {
 	var d *cbg.Deferred
+
+	kb := []byte(k)
 
 	cm, ok := v.(cbg.CBORMarshaler)
 	if ok {
@@ -236,7 +240,7 @@ func (n *Node) Set(ctx context.Context, k string, v interface{}) error {
 		d = &cbg.Deferred{Raw: b}
 	}
 
-	return n.modifyValue(ctx, &hashBits{b: hash(k)}, k, d)
+	return n.modifyValue(ctx, &hashBits{b: hash(kb)}, kb, d)
 }
 
 func (n *Node) cleanChild(chnd *Node, cindex byte) error {
@@ -273,7 +277,7 @@ func (n *Node) cleanChild(chnd *Node, cindex byte) error {
 	}
 }
 
-func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k string, v *cbg.Deferred) error {
+func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.Deferred) error {
 	idx, err := hv.Next(n.bitWidth)
 	if err != nil {
 		return ErrMaxDepth
@@ -308,7 +312,7 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k string, v *cbg.D
 
 	if v == nil {
 		for i, p := range child.KVs {
-			if p.Key == k {
+			if bytes.Equal(p.Key, k) {
 				if len(child.KVs) == 1 {
 					return n.rmChild(cindex, idx)
 				}
@@ -323,7 +327,7 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k string, v *cbg.D
 
 	// check if key already exists
 	for _, p := range child.KVs {
-		if p.Key == k {
+		if bytes.Equal(p.Key, k) {
 			p.Value = v
 			return nil
 		}
@@ -356,7 +360,7 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k string, v *cbg.D
 	// otherwise insert the new element into the array in order
 	np := &KV{Key: k, Value: v}
 	for i := 0; i < len(child.KVs); i++ {
-		if k < child.KVs[i].Key {
+		if bytes.Compare(k, child.KVs[i].Key) < 0 {
 			child.KVs = append(child.KVs[:i], append([]*KV{np}, child.KVs[i:]...)...)
 			return nil
 		}
@@ -365,7 +369,7 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k string, v *cbg.D
 	return nil
 }
 
-func (n *Node) insertChild(idx int, k string, v *cbg.Deferred) error {
+func (n *Node) insertChild(idx int, k []byte, v *cbg.Deferred) error {
 	if v == nil {
 		return ErrNotFound
 	}
@@ -441,7 +445,8 @@ func (n *Node) ForEach(ctx context.Context, f func(k string, val interface{}) er
 			}
 		} else {
 			for _, kv := range p.KVs {
-				if err := f(kv.Key, kv.Value); err != nil {
+				// TODO: consider removing 'strings as keys' from every interface, go full-on bytes everywhere
+				if err := f(string(kv.Key), kv.Value); err != nil {
 					return err
 				}
 			}
