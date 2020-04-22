@@ -19,9 +19,10 @@ type Node struct {
 	Bitfield *big.Int   `refmt:"bf"`
 	Pointers []*Pointer `refmt:"p"`
 
-	// for fetching and storing children
-	store    *CborIpldStore
 	bitWidth int
+
+	// for fetching and storing children
+	store cbor.IpldStore
 }
 
 // Option is a function that configures the node
@@ -39,7 +40,7 @@ func UseTreeBitWidth(bitWidth int) Option {
 
 // NewNode creates a new IPLD HAMT Node with the given store and given
 // options
-func NewNode(cs *CborIpldStore, options ...Option) *Node {
+func NewNode(cs cbor.IpldStore, options ...Option) *Node {
 	nd := &Node{
 		Bitfield: big.NewInt(0),
 		Pointers: make([]*Pointer, 0),
@@ -54,7 +55,7 @@ func NewNode(cs *CborIpldStore, options ...Option) *Node {
 }
 
 type KV struct {
-	Key   string
+	Key   []byte
 	Value *cbg.Deferred
 }
 
@@ -67,7 +68,7 @@ type Pointer struct {
 }
 
 func (n *Node) Find(ctx context.Context, k string, out interface{}) error {
-	kv, _, err := n.getPathAndValue(ctx, &hashBits{b: hash(k)}, k, nil)
+  kv, _, err := n.getPathAndValue(ctx, &hashBits{b: hash([]byte(k))}, k, nil)
 	if err != nil {
 		return err
 	}
@@ -93,8 +94,18 @@ func (n *Node) GetNodesForPath(ctx context.Context, k string) ([]*Node, error) {
 	return nodes, err
 }
 
+func (n *Node) FindRaw(ctx context.Context, k string) ([]byte, error) {
+	var ret []byte
+	err := n.getValue(ctx, &hashBits{b: hash([]byte(k))}, k, func(kv *KV) error {
+		ret = kv.Value.Raw
+		return nil
+	})
+	return ret, err
+}
+
 func (n *Node) Delete(ctx context.Context, k string) error {
-	return n.modifyValue(ctx, &hashBits{b: hash(k)}, k, nil)
+	kb := []byte(k)
+	return n.modifyValue(ctx, &hashBits{b: hash(kb)}, kb, nil)
 }
 
 var ErrNotFound = fmt.Errorf("not found")
@@ -124,7 +135,7 @@ func (n *Node) getPathAndValue(ctx context.Context, hv *hashBits, k string, path
 	}
 
 	for _, kv := range c.KVs {
-		if kv.Key == k {
+    if string(kv.Key) == k {
 			return kv, path, err
 		}
 	}
@@ -132,22 +143,22 @@ func (n *Node) getPathAndValue(ctx context.Context, hv *hashBits, k string, path
 	return nil, nil, ErrNotFound
 }
 
-func (p *Pointer) loadChild(ctx context.Context, ns *CborIpldStore, bitWidth int) (*Node, error) {
+func (p *Pointer) loadChild(ctx context.Context, ns cbor.IpldStore, bitWidth int) (*Node, error) {
 	if p.cache != nil {
 		return p.cache, nil
 	}
 
 	out, err := LoadNode(ctx, ns, p.Link)
-	out.bitWidth = bitWidth
 	if err != nil {
 		return nil, err
 	}
+	out.bitWidth = bitWidth
 
 	p.cache = out
 	return out, nil
 }
 
-func LoadNode(ctx context.Context, cs *CborIpldStore, c cid.Cid, options ...Option) (*Node, error) {
+func LoadNode(ctx context.Context, cs cbor.IpldStore, c cid.Cid, options ...Option) (*Node, error) {
 	var out Node
 	if err := cs.Get(ctx, c, &out); err != nil {
 		return nil, err
@@ -169,12 +180,12 @@ func (n *Node) checkSize(ctx context.Context) (uint64, error) {
 		return 0, err
 	}
 
-	blk, err := n.store.Blocks.GetBlock(ctx, c)
-	if err != nil {
-		return 0, err
+	var def cbg.Deferred
+	if err := n.store.Get(ctx, c, &def); err != nil {
+		return 0, nil
 	}
 
-	totsize := uint64(len(blk.RawData()))
+	totsize := uint64(len(def.Raw))
 	for _, ch := range n.Pointers {
 		if ch.isShard() {
 			chnd, err := ch.loadChild(ctx, n.store, n.bitWidth)
@@ -211,8 +222,17 @@ func (n *Node) Flush(ctx context.Context) error {
 	return nil
 }
 
+// SetRaw sets key k to cbor bytes raw
+func (n *Node) SetRaw(ctx context.Context, k string, raw []byte) error {
+	d := &cbg.Deferred{Raw: raw}
+	kb := []byte(k)
+	return n.modifyValue(ctx, &hashBits{b: hash(kb)}, kb, d)
+}
+
 func (n *Node) Set(ctx context.Context, k string, v interface{}) error {
 	var d *cbg.Deferred
+
+	kb := []byte(k)
 
 	cm, ok := v.(cbg.CBORMarshaler)
 	if ok {
@@ -229,7 +249,7 @@ func (n *Node) Set(ctx context.Context, k string, v interface{}) error {
 		d = &cbg.Deferred{Raw: b}
 	}
 
-	return n.modifyValue(ctx, &hashBits{b: hash(k)}, k, d)
+	return n.modifyValue(ctx, &hashBits{b: hash(kb)}, kb, d)
 }
 
 func (n *Node) cleanChild(chnd *Node, cindex byte) error {
@@ -266,7 +286,7 @@ func (n *Node) cleanChild(chnd *Node, cindex byte) error {
 	}
 }
 
-func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k string, v *cbg.Deferred) error {
+func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.Deferred) error {
 	idx, err := hv.Next(n.bitWidth)
 	if err != nil {
 		return ErrMaxDepth
@@ -301,7 +321,7 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k string, v *cbg.D
 
 	if v == nil {
 		for i, p := range child.KVs {
-			if p.Key == k {
+			if bytes.Equal(p.Key, k) {
 				if len(child.KVs) == 1 {
 					return n.rmChild(cindex, idx)
 				}
@@ -316,7 +336,7 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k string, v *cbg.D
 
 	// check if key already exists
 	for _, p := range child.KVs {
-		if p.Key == k {
+		if bytes.Equal(p.Key, k) {
 			p.Value = v
 			return nil
 		}
@@ -349,7 +369,7 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k string, v *cbg.D
 	// otherwise insert the new element into the array in order
 	np := &KV{Key: k, Value: v}
 	for i := 0; i < len(child.KVs); i++ {
-		if k < child.KVs[i].Key {
+		if bytes.Compare(k, child.KVs[i].Key) < 0 {
 			child.KVs = append(child.KVs[:i], append([]*KV{np}, child.KVs[i:]...)...)
 			return nil
 		}
@@ -358,7 +378,7 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k string, v *cbg.D
 	return nil
 }
 
-func (n *Node) insertChild(idx int, k string, v *cbg.Deferred) error {
+func (n *Node) insertChild(idx int, k []byte, v *cbg.Deferred) error {
 	if v == nil {
 		return ErrNotFound
 	}
@@ -434,7 +454,8 @@ func (n *Node) ForEach(ctx context.Context, f func(k string, val interface{}) er
 			}
 		} else {
 			for _, kv := range p.KVs {
-				if err := f(kv.Key, kv.Value); err != nil {
+				// TODO: consider removing 'strings as keys' from every interface, go full-on bytes everywhere
+				if err := f(string(kv.Key), kv.Value); err != nil {
 					return err
 				}
 			}

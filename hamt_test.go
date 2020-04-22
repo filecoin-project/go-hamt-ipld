@@ -10,8 +10,31 @@ import (
 	"testing"
 	"time"
 
+	block "github.com/ipfs/go-block-format"
+	cid "github.com/ipfs/go-cid"
 	cbor "github.com/ipfs/go-ipld-cbor"
 )
+
+type mockBlocks struct {
+	data map[cid.Cid]block.Block
+}
+
+func newMockBlocks() *mockBlocks {
+	return &mockBlocks{make(map[cid.Cid]block.Block)}
+}
+
+func (mb *mockBlocks) Get(c cid.Cid) (block.Block, error) {
+	d, ok := mb.data[c]
+	if ok {
+		return d, nil
+	}
+	return nil, fmt.Errorf("Not Found")
+}
+
+func (mb *mockBlocks) Put(b block.Block) error {
+	mb.data[b.Cid()] = b
+	return nil
+}
 
 func randString() string {
 	buf := make([]byte, 18)
@@ -32,15 +55,15 @@ func dotGraph(n *Node) {
 	fmt.Println("}")
 }
 
-var identityHash = func(k string) []byte {
+var identityHash = func(k []byte) []byte {
 	res := make([]byte, 32)
-	copy(res, []byte(k))
+	copy(res, k)
 	return res
 }
 
-var shortIdentityHash = func(k string) []byte {
+var shortIdentityHash = func(k []byte) []byte {
 	res := make([]byte, 16)
-	copy(res, []byte(k))
+	copy(res, k)
 	return res
 }
 
@@ -77,7 +100,7 @@ func TestOverflow(t *testing.T) {
 		keys[i] = strings.Repeat("A", 32) + fmt.Sprintf("%d", i)
 	}
 
-	cs := NewCborStore()
+	cs := cbor.NewCborStore(newMockBlocks())
 	n := NewNode(cs)
 	for _, k := range keys[:3] {
 		if err := n.Set(context.Background(), k, "foobar"); err != nil {
@@ -110,7 +133,7 @@ func addAndRemoveKeys(t *testing.T, bitWidth int, keys []string, extraKeys []str
 		vals[s] = randValue()
 	}
 
-	cs := NewCborStore()
+	cs := cbor.NewCborStore(newMockBlocks())
 	begn := NewNode(cs, UseTreeBitWidth(bitWidth))
 	for _, k := range keys {
 		if err := begn.Set(ctx, k, vals[k]); err != nil {
@@ -190,7 +213,7 @@ func dotGraphRec(n *Node, name *int) {
 		} else {
 			var names []string
 			for _, pt := range p.KVs {
-				names = append(names, pt.Key)
+				names = append(names, string(pt.Key))
 			}
 			fmt.Printf("\tn%d -> n%s;\n", cur, strings.Join(names, "_"))
 		}
@@ -227,8 +250,8 @@ func statsrec(n *Node, st *hamtStats) {
 }
 
 func TestHash(t *testing.T) {
-	h1 := hash("abcd")
-	h2 := hash("abce")
+	h1 := hash([]byte("abcd"))
+	h2 := hash([]byte("abce"))
 	if h1[0] == h2[0] && h1[1] == h2[1] && h1[3] == h2[3] {
 		t.Fatal("Hash should give different strings different hash prefixes")
 	}
@@ -236,7 +259,7 @@ func TestHash(t *testing.T) {
 
 func TestBasic(t *testing.T) {
 	ctx := context.Background()
-	cs := NewCborStore()
+	cs := cbor.NewCborStore(newMockBlocks())
 	begn := NewNode(cs)
 
 	val := []byte("cat dog bear")
@@ -275,7 +298,7 @@ func TestBasic(t *testing.T) {
 
 func TestDelete(t *testing.T) {
 	ctx := context.Background()
-	cs := NewCborStore()
+	cs := cbor.NewCborStore(newMockBlocks())
 	begn := NewNode(cs)
 
 	val := []byte("cat dog bear")
@@ -322,7 +345,7 @@ func TestSetGet(t *testing.T) {
 		keys = append(keys, s)
 	}
 
-	cs := NewCborStore()
+	cs := cbor.NewCborStore(newMockBlocks())
 	begn := NewNode(cs)
 	for _, k := range keys {
 		if err := begn.Set(ctx, k, vals[k]); err != nil {
@@ -413,7 +436,7 @@ func TestSetGet(t *testing.T) {
 	}
 }
 
-func nodesEqual(t *testing.T, store *CborIpldStore, n1, n2 *Node) bool {
+func nodesEqual(t *testing.T, store cbor.IpldStore, n1, n2 *Node) bool {
 	ctx := context.Background()
 	err := n1.Flush(ctx)
 	if err != nil {
@@ -436,7 +459,7 @@ func nodesEqual(t *testing.T, store *CborIpldStore, n1, n2 *Node) bool {
 
 func TestReloadEmpty(t *testing.T) {
 	ctx := context.Background()
-	cs := NewCborStore()
+	cs := cbor.NewCborStore(newMockBlocks())
 
 	n := NewNode(cs)
 	c, err := cs.Put(ctx, n)
@@ -456,7 +479,7 @@ func TestReloadEmpty(t *testing.T) {
 
 func TestCopy(t *testing.T) {
 	ctx := context.Background()
-	cs := NewCborStore()
+	cs := cbor.NewCborStore(newMockBlocks())
 
 	n := NewNode(cs)
 	nc := n.Copy()
@@ -479,7 +502,7 @@ func TestCopy(t *testing.T) {
 }
 
 func TestCopyCopiesNilSlices(t *testing.T) {
-	cs := NewCborStore()
+	cs := cbor.NewCborStore(newMockBlocks())
 
 	n := NewNode(cs)
 	pointer := &Pointer{}
@@ -498,7 +521,7 @@ func TestCopyCopiesNilSlices(t *testing.T) {
 
 func TestCopyWithoutFlush(t *testing.T) {
 	ctx := context.Background()
-	cs := NewCborStore()
+	cs := cbor.NewCborStore(newMockBlocks())
 
 	count := 200
 	n := NewNode(cs)
@@ -573,7 +596,7 @@ func TestFindNodesForPath(t *testing.T) {
 
 func TestValueLinking(t *testing.T) {
 	ctx := context.Background()
-	cs := NewCborStore()
+	cs := cbor.NewCborStore(newMockBlocks())
 
 	thingy1 := map[string]string{"cat": "dog"}
 	c1, err := cs.Put(ctx, thingy1)
@@ -597,7 +620,7 @@ func TestValueLinking(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	blk, err := cs.Blocks.GetBlock(ctx, tcid)
+	blk, err := cs.Blocks.Get(tcid)
 	if err != nil {
 		t.Fatal(err)
 	}

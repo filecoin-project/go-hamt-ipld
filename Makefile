@@ -1,13 +1,14 @@
-all: deps
+all: build
 
-gx:
-	go get github.com/whyrusleeping/gx
-	go get github.com/whyrusleeping/gx-go
+build:
+	go build ./...
+.PHONY: build
 
-deps: gx 
-	gx --verbose install --global
-	gx-go rewrite
+test:
+	go test ./...
+.PHONY: test
 
-publish:
-	gx-go rewrite --undo
+benchmark:
+	go test -bench=./...
+.PHONY: benchmark
 

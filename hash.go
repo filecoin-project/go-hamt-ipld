@@ -49,8 +49,8 @@ func (hb *hashBits) next(i int) int {
 	}
 }
 
-var hash = func(val string) []byte {
+var hash = func(val []byte) []byte {
 	h := murmur3.New64()
-	h.Write([]byte(val))
+	h.Write(val)
 	return h.Sum(nil)
 }
