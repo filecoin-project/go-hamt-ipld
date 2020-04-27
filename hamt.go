@@ -79,7 +79,7 @@ func (n *Node) Find(ctx context.Context, k string, out interface{}) error {
 		}
 
 		if err := cbor.DecodeInto(kv.Value.Raw, out); err != nil {
-			xerrors.Errorf("cbor decoding value: %w", err)
+			return xerrors.Errorf("cbor decoding value: %w", err)
 		}
 
 		return nil
