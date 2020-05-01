@@ -13,6 +13,7 @@ import (
 	block "github.com/ipfs/go-block-format"
 	cid "github.com/ipfs/go-cid"
 	cbor "github.com/ipfs/go-ipld-cbor"
+	cbg "github.com/whyrusleeping/cbor-gen"
 )
 
 type mockBlocks struct {
@@ -595,4 +596,50 @@ func TestValueLinking(t *testing.T) {
 
 	fmt.Println("thingy1", c1)
 	fmt.Println(nd.Links()[0])
+}
+
+func TestSetNilValues(t *testing.T) {
+	ctx := context.Background()
+	cs := cbor.NewCborStore(newMockBlocks())
+
+	n := NewNode(cs)
+
+	k := make([]byte, 1)
+
+	for i := 0; i < 500; i++ {
+		k[0] = byte(i)
+		var um cbg.CBORMarshaler
+		if err := n.Set(ctx, string(k), um); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	nn := NewNode(cs)
+
+	rc, err := cs.Put(ctx, nn)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 500; i++ {
+		tn, err := LoadNode(ctx, cs, rc)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		k[0] = byte(i)
+		var n cbg.CBORMarshaler
+		if err := tn.Set(ctx, string(k), n); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := tn.Flush(ctx); err != nil {
+			t.Fatal(err)
+		}
+
+		rc, err = cs.Put(ctx, tn)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 }

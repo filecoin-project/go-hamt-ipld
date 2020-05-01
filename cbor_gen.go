@@ -74,6 +74,7 @@ func (t *Node) UnmarshalCBOR(r io.Reader) error {
 	}
 
 	// t.Bitfield (big.Int) (struct)
+
 	maj, extra, err = cbg.CborReadHeader(br)
 	if err != nil {
 		return err
@@ -110,9 +111,11 @@ func (t *Node) UnmarshalCBOR(r io.Reader) error {
 	if maj != cbg.MajArray {
 		return fmt.Errorf("expected cbor array")
 	}
+
 	if extra > 0 {
 		t.Pointers = make([]*Pointer, extra)
 	}
+
 	for i := 0; i < int(extra); i++ {
 
 		var v Pointer
@@ -190,22 +193,11 @@ func (t *KV) UnmarshalCBOR(r io.Reader) error {
 
 	{
 
-		pb, err := br.PeekByte()
-		if err != nil {
-			return err
-		}
-		if pb == cbg.CborNull[0] {
-			var nbuf [1]byte
-			if _, err := br.Read(nbuf[:]); err != nil {
-				return err
-			}
-		} else {
-			t.Value = new(cbg.Deferred)
-			if err := t.Value.UnmarshalCBOR(br); err != nil {
-				return err
-			}
-		}
+		t.Value = new(cbg.Deferred)
 
+		if err := t.Value.UnmarshalCBOR(br); err != nil {
+			return xerrors.Errorf("failed to read deferred field: %w", err)
+		}
 	}
 	return nil
 }
