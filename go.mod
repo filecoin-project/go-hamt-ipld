@@ -6,7 +6,7 @@ require (
 	github.com/ipfs/go-ipld-cbor v0.0.4
 	github.com/ipfs/go-ipld-format v0.0.2 // indirect
 	github.com/spaolacci/murmur3 v1.1.0
-	github.com/whyrusleeping/cbor-gen v0.0.0-20200123233031-1cdf64d27158
+	github.com/whyrusleeping/cbor-gen v0.0.0-20200501014322-5f9941ef88e0
 	golang.org/x/sys v0.0.0-20190626221950-04f50cda93cb // indirect
 	golang.org/x/xerrors v0.0.0-20191204190536-9bdfabe68543
 )
