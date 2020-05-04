@@ -67,8 +67,8 @@ type Pointer struct {
 	cache *Node
 }
 
-func (n *Node) Find(ctx context.Context, k string, out interface{}) error {
-	return n.getValue(ctx, &hashBits{b: hash([]byte(k))}, k, func(kv *KV) error {
+func (n *Node) Find(ctx context.Context, k []byte, out interface{}) error {
+	return n.getValue(ctx, &hashBits{b: hash(k)}, k, func(kv *KV) error {
 		// used to just see if the thing exists in the set
 		if out == nil {
 			return nil
@@ -86,9 +86,9 @@ func (n *Node) Find(ctx context.Context, k string, out interface{}) error {
 	})
 }
 
-func (n *Node) FindRaw(ctx context.Context, k string) ([]byte, error) {
+func (n *Node) FindRaw(ctx context.Context, k []byte) ([]byte, error) {
 	var ret []byte
-	err := n.getValue(ctx, &hashBits{b: hash([]byte(k))}, k, func(kv *KV) error {
+	err := n.getValue(ctx, &hashBits{b: hash(k)}, k, func(kv *KV) error {
 		ret = kv.Value.Raw
 		return nil
 	})
@@ -103,7 +103,7 @@ func (n *Node) Delete(ctx context.Context, k string) error {
 var ErrNotFound = fmt.Errorf("not found")
 var ErrMaxDepth = fmt.Errorf("attempted to traverse hamt beyond max depth")
 
-func (n *Node) getValue(ctx context.Context, hv *hashBits, k string, cb func(*KV) error) error {
+func (n *Node) getValue(ctx context.Context, hv *hashBits, k []byte, cb func(*KV) error) error {
 	idx, err := hv.Next(n.bitWidth)
 	if err != nil {
 		return ErrMaxDepth
@@ -126,7 +126,7 @@ func (n *Node) getValue(ctx context.Context, hv *hashBits, k string, cb func(*KV
 	}
 
 	for _, kv := range c.KVs {
-		if string(kv.Key) == k {
+		if bytes.Equal(kv.Key, k) {
 			return cb(kv)
 		}
 	}
@@ -220,10 +220,8 @@ func (n *Node) SetRaw(ctx context.Context, k string, raw []byte) error {
 	return n.modifyValue(ctx, &hashBits{b: hash(kb)}, kb, d)
 }
 
-func (n *Node) Set(ctx context.Context, k string, v interface{}) error {
+func (n *Node) Set(ctx context.Context, k []byte, v interface{}) error {
 	var d *cbg.Deferred
-
-	kb := []byte(k)
 
 	cm, ok := v.(cbg.CBORMarshaler)
 	if ok {
@@ -240,7 +238,7 @@ func (n *Node) Set(ctx context.Context, k string, v interface{}) error {
 		d = &cbg.Deferred{Raw: b}
 	}
 
-	return n.modifyValue(ctx, &hashBits{b: hash(kb)}, kb, d)
+	return n.modifyValue(ctx, &hashBits{b: hash(k)}, k, d)
 }
 
 func (n *Node) cleanChild(chnd *Node, cindex byte) error {
@@ -343,6 +341,9 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.D
 		}
 
 		for _, p := range child.KVs {
+			if p.Value == nil {
+				return fmt.Errorf("invariant broken: unmarshaled kv object should never have 'nil' value")
+			}
 			chhv := &hashBits{b: hash(p.Key), consumed: hv.consumed}
 			if err := sub.modifyValue(ctx, chhv, p.Key, p.Value); err != nil {
 				return err

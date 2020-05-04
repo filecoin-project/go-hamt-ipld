@@ -15,10 +15,10 @@ type rander struct {
 	r *rand.Rand
 }
 
-func (r *rander) randString() string {
+func (r *rander) randKey() []byte {
 	buf := make([]byte, 18)
 	rand.Read(buf)
-	return hex.EncodeToString(buf)
+	return []byte(hex.EncodeToString(buf))
 }
 
 func (r *rander) randValue() []byte {
@@ -34,7 +34,7 @@ func BenchmarkSerializeNode(b *testing.B) {
 	n := NewNode(cs)
 
 	for i := 0; i < 50; i++ {
-		if err := n.Set(context.TODO(), r.randString(), r.randValue()); err != nil {
+		if err := n.Set(context.TODO(), r.randKey(), r.randValue()); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -75,7 +75,7 @@ func BenchmarkSet(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				for j := 0; j < t.count; j++ {
-					if err := n.Set(ctx, r.randString(), r.randValue()); err != nil {
+					if err := n.Set(ctx, r.randKey(), r.randValue()); err != nil {
 						b.Fatal(err)
 					}
 				}
@@ -100,9 +100,9 @@ func doBenchmarkEntriesCount(num int, bitWidth int) func(b *testing.B) {
 		cs := cbor.NewCborStore(newMockBlocks())
 		n := NewNode(cs, UseTreeBitWidth(bitWidth))
 
-		var keys []string
+		var keys [][]byte
 		for i := 0; i < num; i++ {
-			k := r.randString()
+			k := r.randKey()
 			if err := n.Set(context.TODO(), k, r.randValue()); err != nil {
 				b.Fatal(err)
 			}
@@ -128,7 +128,7 @@ func doBenchmarkEntriesCount(num int, bitWidth int) func(b *testing.B) {
 				b.Fatal(err)
 			}
 
-			if err = nd.Find(context.TODO(), keys[i%num], nil); err != nil {
+			if err = nd.Find(context.TODO(), []byte(keys[i%num]), nil); err != nil {
 				b.Fatal(err)
 			}
 		}
