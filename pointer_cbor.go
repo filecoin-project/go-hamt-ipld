@@ -8,12 +8,17 @@ import (
 	cbg "github.com/whyrusleeping/cbor-gen"
 )
 
+var keyZero = []byte("0")
+var keyOne = []byte("1")
+
 func (t *Pointer) MarshalCBOR(w io.Writer) error {
 	if t.Link != cid.Undef && len(t.KVs) > 0 {
 		return fmt.Errorf("hamt Pointer cannot have both a link and KVs")
 	}
 
-	if err := cbg.CborWriteHeader(w, cbg.MajMap, 1); err != nil {
+	scratch := make([]byte, 9)
+
+	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajMap, 1); err != nil {
 		return err
 	}
 
@@ -22,28 +27,28 @@ func (t *Pointer) MarshalCBOR(w io.Writer) error {
 		// Refmt (and the general IPLD data model currently) can't deal
 		// with non string keys. So we have this weird restriction right now
 		// hoping to be able to use integer keys soon
-		if err := cbg.CborWriteHeader(w, cbg.MajTextString, 1); err != nil {
+		if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajTextString, 1); err != nil {
 			return err
 		}
 
-		if _, err := w.Write([]byte("0")); err != nil {
+		if _, err := w.Write(keyZero); err != nil {
 			return err
 		}
 
-		if err := cbg.WriteCid(w, t.Link); err != nil {
+		if err := cbg.WriteCidBuf(scratch, w, t.Link); err != nil {
 			return err
 		}
 	} else {
 		// key for KVs is "1"
-		if err := cbg.CborWriteHeader(w, cbg.MajTextString, 1); err != nil {
+		if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajTextString, 1); err != nil {
 			return err
 		}
 
-		if _, err := w.Write([]byte("1")); err != nil {
+		if _, err := w.Write(keyOne); err != nil {
 			return err
 		}
 
-		if err := cbg.CborWriteHeader(w, cbg.MajArray, uint64(len(t.KVs))); err != nil {
+		if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajArray, uint64(len(t.KVs))); err != nil {
 			return err
 		}
 
@@ -58,7 +63,9 @@ func (t *Pointer) MarshalCBOR(w io.Writer) error {
 }
 
 func (t *Pointer) UnmarshalCBOR(br io.Reader) error {
-	maj, extra, err := cbg.CborReadHeader(br)
+	scratch := make([]byte, 8)
+
+	maj, extra, err := cbg.CborReadHeaderBuf(br, scratch)
 	if err != nil {
 		return err
 	}
@@ -70,7 +77,7 @@ func (t *Pointer) UnmarshalCBOR(br io.Reader) error {
 		return fmt.Errorf("Pointers should be a single element map")
 	}
 
-	maj, val, err := cbg.CborReadHeader(br)
+	maj, val, err := cbg.CborReadHeaderBuf(br, scratch)
 	if err != nil {
 		return err
 	}
@@ -83,21 +90,20 @@ func (t *Pointer) UnmarshalCBOR(br io.Reader) error {
 		return fmt.Errorf("map keys in pointers must be a single byte long")
 	}
 
-	var b [1]byte
-	if _, err := io.ReadFull(br, b[:]); err != nil {
+	if _, err := io.ReadAtLeast(br, scratch[:1], 1); err != nil {
 		return err
 	}
 
-	switch string(b[:]) {
-	case "0":
+	switch scratch[0] {
+	case '0':
 		c, err := cbg.ReadCid(br)
 		if err != nil {
 			return err
 		}
 		t.Link = c
 		return nil
-	case "1":
-		maj, length, err := cbg.CborReadHeader(br)
+	case '1':
+		maj, length, err := cbg.CborReadHeaderBuf(br, scratch)
 		if err != nil {
 			return err
 		}
