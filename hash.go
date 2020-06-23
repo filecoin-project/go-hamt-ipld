@@ -49,7 +49,7 @@ func (hb *hashBits) next(i int) int {
 	}
 }
 
-var hash = func(val []byte) []byte {
+func defaultHashFunction(val []byte) []byte {
 	h := murmur3.New64()
 	h.Write(val)
 	return h.Sum(nil)
