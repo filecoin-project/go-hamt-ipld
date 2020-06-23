@@ -3,6 +3,7 @@ package hamt
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"math/rand"
@@ -68,41 +69,27 @@ var shortIdentityHash = func(k []byte) []byte {
 	return res
 }
 
-var murmurHash = hash
-
 func TestCanonicalStructure(t *testing.T) {
-	hash = identityHash
-	defer func() {
-		hash = murmurHash
-	}()
-	addAndRemoveKeys(t, defaultBitWidth, []string{"K"}, []string{"B"})
-	addAndRemoveKeys(t, defaultBitWidth, []string{"K0", "K1", "KAA1", "KAA2", "KAA3"}, []string{"KAA4"})
+	addAndRemoveKeys(t, []string{"K"}, []string{"B"}, UseHashFunction(identityHash))
+	addAndRemoveKeys(t, []string{"K0", "K1", "KAA1", "KAA2", "KAA3"}, []string{"KAA4"})
 }
 
 func TestCanonicalStructureAlternateBitWidth(t *testing.T) {
-	hash = identityHash
-	defer func() {
-		hash = murmurHash
-	}()
-	addAndRemoveKeys(t, 7, []string{"K"}, []string{"B"})
-	addAndRemoveKeys(t, 7, []string{"K0", "K1", "KAA1", "KAA2", "KAA3"}, []string{"KAA4"})
-	addAndRemoveKeys(t, 6, []string{"K"}, []string{"B"})
-	addAndRemoveKeys(t, 6, []string{"K0", "K1", "KAA1", "KAA2", "KAA3"}, []string{"KAA4"})
-	addAndRemoveKeys(t, 5, []string{"K"}, []string{"B"})
-	addAndRemoveKeys(t, 5, []string{"K0", "K1", "KAA1", "KAA2", "KAA3"}, []string{"KAA4"})
+	addAndRemoveKeys(t, []string{"K"}, []string{"B"}, UseTreeBitWidth(7), UseHashFunction(identityHash))
+	addAndRemoveKeys(t, []string{"K0", "K1", "KAA1", "KAA2", "KAA3"}, []string{"KAA4"}, UseTreeBitWidth(7), UseHashFunction(identityHash))
+	addAndRemoveKeys(t, []string{"K"}, []string{"B"}, UseTreeBitWidth(6), UseHashFunction(identityHash))
+	addAndRemoveKeys(t, []string{"K0", "K1", "KAA1", "KAA2", "KAA3"}, []string{"KAA4"}, UseTreeBitWidth(6), UseHashFunction(identityHash))
+	addAndRemoveKeys(t, []string{"K"}, []string{"B"}, UseTreeBitWidth(5), UseHashFunction(identityHash))
+	addAndRemoveKeys(t, []string{"K0", "K1", "KAA1", "KAA2", "KAA3"}, []string{"KAA4"}, UseTreeBitWidth(5), UseHashFunction(identityHash))
 }
 func TestOverflow(t *testing.T) {
-	hash = identityHash
-	defer func() {
-		hash = murmurHash
-	}()
 	keys := make([]string, 4)
 	for i := range keys {
 		keys[i] = strings.Repeat("A", 32) + fmt.Sprintf("%d", i)
 	}
 
 	cs := cbor.NewCborStore(newMockBlocks())
-	n := NewNode(cs)
+	n := NewNode(cs, UseHashFunction(identityHash))
 	for _, k := range keys[:3] {
 		if err := n.Set(context.Background(), k, "foobar"); err != nil {
 			t.Error(err)
@@ -120,13 +107,13 @@ func TestOverflow(t *testing.T) {
 	}
 
 	// Now, try fetching with a shorter hash function.
-	hash = shortIdentityHash
+	n.hash = shortIdentityHash
 	if err := n.Find(context.Background(), keys[0], nil); err != ErrMaxDepth {
 		t.Errorf("expected error %q, got %q", ErrMaxDepth, err)
 	}
 }
 
-func addAndRemoveKeys(t *testing.T, bitWidth int, keys []string, extraKeys []string) {
+func addAndRemoveKeys(t *testing.T, keys []string, extraKeys []string, options ...Option) {
 	ctx := context.Background()
 	vals := make(map[string][]byte)
 	for i := 0; i < len(keys); i++ {
@@ -135,7 +122,7 @@ func addAndRemoveKeys(t *testing.T, bitWidth int, keys []string, extraKeys []str
 	}
 
 	cs := cbor.NewCborStore(newMockBlocks())
-	begn := NewNode(cs, UseTreeBitWidth(bitWidth))
+	begn := NewNode(cs, options...)
 	for _, k := range keys {
 		if err := begn.Set(ctx, k, vals[k]); err != nil {
 			t.Fatal(err)
@@ -158,7 +145,8 @@ func addAndRemoveKeys(t *testing.T, bitWidth int, keys []string, extraKeys []str
 		t.Fatal(err)
 	}
 	n.store = cs
-	n.bitWidth = bitWidth
+	n.hash = begn.hash
+	n.bitWidth = begn.bitWidth
 	for k, v := range vals {
 		var out []byte
 		err := n.Find(ctx, k, &out)
@@ -193,7 +181,8 @@ func addAndRemoveKeys(t *testing.T, bitWidth int, keys []string, extraKeys []str
 		t.Fatal(err)
 	}
 	n2.store = cs
-	n2.bitWidth = bitWidth
+	n2.hash = begn.hash
+	n2.bitWidth = begn.bitWidth
 	if !nodesEqual(t, cs, &n, &n2) {
 		t.Fatal("nodes should be equal")
 	}
@@ -205,7 +194,7 @@ func dotGraphRec(n *Node, name *int) {
 		if p.isShard() {
 			*name++
 			fmt.Printf("\tn%d -> n%d;\n", cur, *name)
-			nd, err := p.loadChild(context.Background(), n.store, n.bitWidth)
+			nd, err := p.loadChild(context.Background(), n.store, n.bitWidth, n.hash)
 			if err != nil {
 				panic(err)
 			}
@@ -237,7 +226,7 @@ func statsrec(n *Node, st *hamtStats) {
 	st.totalNodes++
 	for _, p := range n.Pointers {
 		if p.isShard() {
-			nd, err := p.loadChild(context.Background(), n.store, n.bitWidth)
+			nd, err := p.loadChild(context.Background(), n.store, n.bitWidth, n.hash)
 			if err != nil {
 				panic(err)
 			}
@@ -251,17 +240,28 @@ func statsrec(n *Node, st *hamtStats) {
 }
 
 func TestHash(t *testing.T) {
-	h1 := hash([]byte("abcd"))
-	h2 := hash([]byte("abce"))
+	h1 := defaultHashFunction([]byte("abcd"))
+	h2 := defaultHashFunction([]byte("abce"))
 	if h1[0] == h2[0] && h1[1] == h2[1] && h1[3] == h2[3] {
 		t.Fatal("Hash should give different strings different hash prefixes")
 	}
 }
 
 func TestBasic(t *testing.T) {
+	testBasic(t)
+}
+
+func TestSha256(t *testing.T) {
+	testBasic(t, UseHashFunction(func(in []byte) []byte {
+		out := sha256.Sum256(in)
+		return out[:]
+	}))
+}
+
+func testBasic(t *testing.T, options ...Option) {
 	ctx := context.Background()
 	cs := cbor.NewCborStore(newMockBlocks())
-	begn := NewNode(cs)
+	begn := NewNode(cs, options...)
 
 	val := []byte("cat dog bear")
 	if err := begn.Set(ctx, "foo", val); err != nil {
@@ -282,7 +282,7 @@ func TestBasic(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	n, err := LoadNode(ctx, cs, c)
+	n, err := LoadNode(ctx, cs, c, options...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -381,6 +381,7 @@ func TestSetGet(t *testing.T) {
 		t.Fatal(err)
 	}
 	n.store = cs
+	n.hash = defaultHashFunction
 	n.bitWidth = defaultBitWidth
 	bef = time.Now()
 	//for k, v := range vals {
