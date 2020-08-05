@@ -129,12 +129,12 @@ func addAndRemoveKeys(t *testing.T, keys []string, extraKeys []string, options .
 		}
 	}
 
-	fmt.Println("start flush")
-	bef := time.Now()
+	// fmt.Println("start flush")
+	// bef := time.Now()
 	if err := begn.Flush(ctx); err != nil {
 		t.Fatal(err)
 	}
-	fmt.Println("flush took: ", time.Since(bef))
+	// fmt.Println("flush took: ", time.Since(bef))
 	c, err := cs.Put(ctx, begn)
 	if err != nil {
 		t.Fatal(err)
@@ -157,6 +157,8 @@ func addAndRemoveKeys(t *testing.T, keys []string, extraKeys []string, options .
 			t.Fatalf("got wrong value after value change: %x != %x", out, v)
 		}
 	}
+
+	printHamt(begn)
 
 	// create second hamt by adding and deleting the extra keys
 	for i := 0; i < len(extraKeys); i++ {
@@ -186,6 +188,37 @@ func addAndRemoveKeys(t *testing.T, keys []string, extraKeys []string, options .
 	if !nodesEqual(t, cs, &n, &n2) {
 		t.Fatal("nodes should be equal")
 	}
+}
+
+func printHamt(hamt *Node) {
+	ctx := context.Background()
+
+	var printNode func(n *Node, depth int)
+
+	printNode = func(n *Node, depth int) {
+		c, err := n.store.Put(ctx, n)
+		if err != nil {
+			panic(err)
+		}
+		fmt.Printf("%s‣ %v:\n", strings.Repeat("  ", depth), c)
+		for _, p := range n.Pointers {
+			if p.isShard() {
+				child, err := p.loadChild(ctx, n.store, n.bitWidth, n.hash)
+				if err != nil {
+					panic(err)
+				}
+				printNode(child, depth+1)
+			} else {
+				var keys []string
+				for _, pt := range p.KVs {
+					keys = append(keys, string(pt.Key))
+				}
+				fmt.Printf("%s⇶ [ %s ]\n", strings.Repeat("  ", depth+1), strings.Join(keys, ", "))
+			}
+		}
+	}
+
+	printNode(hamt, 0)
 }
 
 func dotGraphRec(n *Node, name *int) {
