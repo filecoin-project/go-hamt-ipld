@@ -82,9 +82,9 @@ type Node struct {
 //
 // There are between 1 and 2^bitWidth of these Pointers in any HAMT node.
 //
-// A Pointer contains either a KV bucket of `bucketSize` (3) values or a link
-// (CID) to a child node. When a KV bucket overflows beyond `bucketSize`, the
-// bucket is replaced with a link to a newly created HAMT node which will
+// A Pointer contains either a KV bucket of up to `bucketSize` (3) values or a
+// link (CID) to a child node. When a KV bucket overflows beyond `bucketSize`,
+// the bucket is replaced with a link to a newly created HAMT node which will
 // contain the `bucketSize+1` elements in its own Pointers array.
 //
 // (Note: the `refmt` tags are ignored by cbor-gen which will generate an
@@ -119,7 +119,7 @@ type Pointer struct {
 // `bucketSize` KV elements, where each KV contains a key and value pair
 // stored by the user.
 //
-// Keys are represented as bytes
+// Keys are represented as bytes.
 //
 // The IPLD Schema representation of this data structure is as follows:
 //
@@ -290,8 +290,6 @@ func (n *Node) getValue(ctx context.Context, hv *hashBits, k string, cb func(*KV
 		if string(kv.Key) == k {
 			return cb(kv)
 		}
-		// TODO: getting here would indicate a malformed HAMT, return error of some
-		// kind
 	}
 
 	return ErrNotFound
