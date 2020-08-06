@@ -113,6 +113,174 @@ func TestOverflow(t *testing.T) {
 	}
 }
 
+func TestFillAndCollapse(t *testing.T) {
+	ctx := context.Background()
+	cs := cbor.NewCborStore(newMockBlocks())
+	root := NewNode(cs, UseTreeBitWidth(8), UseHashFunction(identityHash))
+	val := randValue()
+
+	// start with a single node and a single full bucket
+	if err := root.Set(ctx, "AAAAAA11", val); err != nil {
+		t.Fatal(err)
+	}
+	if err := root.Set(ctx, "AAAAAA12", val); err != nil {
+		t.Fatal(err)
+	}
+	if err := root.Set(ctx, "AAAAAA21", val); err != nil {
+		t.Fatal(err)
+	}
+
+	st := stats(root)
+	fmt.Println(st)
+	printHamt(root)
+	if st.totalNodes != 1 || st.totalKvs != 3 || st.counts[3] != 1 {
+		t.Fatal("Should be 1 node with 1 bucket")
+	}
+
+	baseCid, err := cs.Put(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add a 4th colliding entry that forces a chain of new nodes to accommodate
+	// in a new node where there aren't collisions (7th byte)
+	if err := root.Set(ctx, "AAAAAA22", val); err != nil {
+		t.Fatal(err)
+	}
+
+	st = stats(root)
+	fmt.Println(st)
+	printHamt(root)
+	if st.totalNodes != 7 || st.totalKvs != 4 || st.counts[2] != 2 {
+		t.Fatal("Should be 7 nodes with 4 buckets")
+	}
+
+	// remove and we should be back to the same structure as before
+	if err := root.Delete(ctx, "AAAAAA22"); err != nil {
+		t.Fatal(err)
+	}
+
+	st = stats(root)
+	fmt.Println(st)
+	printHamt(root)
+	if st.totalNodes != 1 || st.totalKvs != 3 || st.counts[3] != 1 {
+		t.Fatal("Should be 1 node with 1 bucket")
+	}
+
+	c, err := cs.Put(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.Equals(baseCid) {
+		t.Fatal("CID mismatch on mutation")
+	}
+
+	// insert elements that collide at the 4th position so push the tree down by
+	// 3 nodes
+	if err := root.Set(ctx, "AAA11AA", val); err != nil {
+		t.Fatal(err)
+	}
+	if err := root.Set(ctx, "AAA12AA", val); err != nil {
+		t.Fatal(err)
+	}
+	if err := root.Set(ctx, "AAA13AA", val); err != nil {
+		t.Fatal(err)
+	}
+	st = stats(root)
+	fmt.Println(st)
+	printHamt(root)
+	if st.totalNodes != 4 || st.totalKvs != 6 || st.counts[3] != 2 {
+		t.Fatal("Should be 4 nodes with 2 buckets of 3")
+	}
+
+	midCid, err := cs.Put(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// insert an overflow node that pushes the previous 4 into a separate node
+	if err := root.Set(ctx, "AAA14AA", val); err != nil {
+		t.Fatal(err)
+	}
+
+	st = stats(root)
+	fmt.Println(st)
+	printHamt(root)
+	if st.totalNodes != 5 || st.totalKvs != 7 || st.counts[1] != 4 || st.counts[3] != 1 {
+		t.Fatal("Should be 4 node with 2 buckets")
+	}
+
+	// put the colliding 4th back in that will push down to full height
+	if err := root.Set(ctx, "AAAAAA22", val); err != nil {
+		t.Fatal(err)
+	}
+
+	st = stats(root)
+	fmt.Println(st)
+	printHamt(root)
+	if st.totalNodes != 8 || st.totalKvs != 8 || st.counts[1] != 4 || st.counts[2] != 2 {
+		t.Fatal("Should be 7 nodes with 5 buckets")
+	}
+
+	// rewind back one step
+	if err := root.Delete(ctx, "AAAAAA22"); err != nil {
+		t.Fatal(err)
+	}
+
+	st = stats(root)
+	fmt.Println(st)
+	printHamt(root)
+	if st.totalNodes != 5 || st.totalKvs != 7 || st.counts[1] != 4 || st.counts[3] != 1 {
+		t.Fatal("Should be 4 node with 2 buckets")
+	}
+
+	// rewind another step
+	if err := root.Delete(ctx, "AAA14AA"); err != nil {
+		t.Fatal(err)
+	}
+	st = stats(root)
+	fmt.Println(st)
+	printHamt(root)
+	if st.totalNodes != 4 || st.totalKvs != 6 || st.counts[3] != 2 {
+		t.Fatal("Should be 4 nodes with 2 buckets of 3")
+	}
+
+	c, err = cs.Put(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.Equals(midCid) {
+		t.Fatal("CID mismatch on mutation")
+	}
+
+	// remove the 3 colliding node so we should be back to the initial state
+	if err := root.Delete(ctx, "AAA11AA"); err != nil {
+		t.Fatal(err)
+	}
+	if err := root.Delete(ctx, "AAA12AA"); err != nil {
+		t.Fatal(err)
+	}
+	if err := root.Delete(ctx, "AAA13AA"); err != nil {
+		t.Fatal(err)
+	}
+
+	st = stats(root)
+	fmt.Println(st)
+	printHamt(root)
+	if st.totalNodes != 1 || st.totalKvs != 3 || st.counts[3] != 1 {
+		t.Fatal("Should be 1 node with 1 bucket")
+	}
+
+	// should have the same CID as original
+	c, err = cs.Put(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.Equals(baseCid) {
+		t.Fatal("CID mismatch on mutation")
+	}
+}
+
 func addAndRemoveKeys(t *testing.T, keys []string, extraKeys []string, options ...Option) {
 	ctx := context.Background()
 	vals := make(map[string][]byte)
@@ -129,12 +297,12 @@ func addAndRemoveKeys(t *testing.T, keys []string, extraKeys []string, options .
 		}
 	}
 
-	// fmt.Println("start flush")
-	// bef := time.Now()
+	fmt.Println("start flush")
+	bef := time.Now()
 	if err := begn.Flush(ctx); err != nil {
 		t.Fatal(err)
 	}
-	// fmt.Println("flush took: ", time.Since(bef))
+	fmt.Println("flush took: ", time.Since(bef))
 	c, err := cs.Put(ctx, begn)
 	if err != nil {
 		t.Fatal(err)
@@ -247,6 +415,10 @@ type hamtStats struct {
 	totalNodes int
 	totalKvs   int
 	counts     map[int]int
+}
+
+func (hs hamtStats) String() string {
+	return fmt.Sprintf("nodes=%d, kvs=%d, counts=%v", hs.totalNodes, hs.totalKvs, hs.counts)
 }
 
 func stats(n *Node) *hamtStats {
