@@ -63,6 +63,8 @@ func (t *Node) MarshalCBOR(w io.Writer) error {
 }
 
 func (t *Node) UnmarshalCBOR(r io.Reader) error {
+	*t = Node{}
+
 	br := cbg.GetPeeker(r)
 	scratch := make([]byte, 8)
 
@@ -156,7 +158,7 @@ func (t *KV) MarshalCBOR(w io.Writer) error {
 		return err
 	}
 
-	if _, err := w.Write(t.Key); err != nil {
+	if _, err := w.Write(t.Key[:]); err != nil {
 		return err
 	}
 
@@ -168,6 +170,8 @@ func (t *KV) MarshalCBOR(w io.Writer) error {
 }
 
 func (t *KV) UnmarshalCBOR(r io.Reader) error {
+	*t = KV{}
+
 	br := cbg.GetPeeker(r)
 	scratch := make([]byte, 8)
 
@@ -196,8 +200,12 @@ func (t *KV) UnmarshalCBOR(r io.Reader) error {
 	if maj != cbg.MajByteString {
 		return fmt.Errorf("expected byte array")
 	}
-	t.Key = make([]byte, extra)
-	if _, err := io.ReadFull(br, t.Key); err != nil {
+
+	if extra > 0 {
+		t.Key = make([]byte, extra)
+	}
+
+	if _, err := io.ReadFull(br, t.Key[:]); err != nil {
 		return err
 	}
 	// t.Value (typegen.Deferred) (struct)
