@@ -51,47 +51,103 @@ func BenchmarkSerializeNode(b *testing.B) {
 }
 
 type benchSetCase struct {
-	count    int
+	kcount   int
 	bitwidth int
 }
 
-func BenchmarkSet(b *testing.B) {
-	kCounts := []int{1, 10, 100}
-	bitwidths := []int{5, 8}
+var benchSetCaseTable []benchSetCase
 
-	var table []benchSetCase
-	for _, c := range kCounts {
-
-		for _, bw := range bitwidths {
-			table = append(table, benchSetCase{count: c * 1000, bitwidth: bw})
-		}
-
+func init() {
+	kCounts := []int{
+		1,
+		10,
+		100,
+		1000,  // aka 1M
+		10000, // aka 10M -- you'll need a lot of RAM for this.  Also, some patience.
 	}
-	r := rander{rand.New(rand.NewSource(int64(42)))}
-	for _, t := range table {
-		b.Run(fmt.Sprintf("%d/%d", t.count, t.bitwidth), func(b *testing.B) {
-			ctx := context.Background()
-			n := NewNode(cbor.NewCborStore(newMockBlocks()), UseTreeBitWidth(t.bitwidth))
-			b.ResetTimer()
+	bitwidths := []int{
+		3,
+		//4,
+		5,
+		//6,
+		//7,
+		8,
+	}
+	// bucketsize-aka-arraywidth?  maybe someday.
+	for _, c := range kCounts {
+		for _, bw := range bitwidths {
+			benchSetCaseTable = append(benchSetCaseTable, benchSetCase{kcount: c, bitwidth: bw})
+		}
+	}
+}
+
+// BenchmarkFill creates a large HAMT, and measures how long it takes to generate all of this many entries.
+//
+// The number of blocks saved to the blockstore per entry is reported, and the total content size in bytes.
+// The nanoseconds-per-op report on this function is not very useful, because the size of "op" varies with "n" between benchmarks.
+//
+// See "BenchmarkSet" for a probe of how long it takes to set additional entries in an already-large hamt
+// (this gives a more interesting and useful nanoseconds-per-op).
+func BenchmarkFill(b *testing.B) {
+	for _, t := range benchSetCaseTable {
+		b.Run(fmt.Sprintf("n=%dk/bitwidth=%d", t.kcount, t.bitwidth), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				for j := 0; j < t.count; j++ {
-					if err := n.Set(ctx, r.randString(), r.randValue()); err != nil {
+				r := rander{rand.New(rand.NewSource(int64(i)))}
+				blockstore := newMockBlocks()
+				n := NewNode(cbor.NewCborStore(blockstore), UseTreeBitWidth(t.bitwidth))
+				//b.ResetTimer()
+				for j := 0; j < t.kcount*1000; j++ {
+					if err := n.Set(context.Background(), r.randString(), r.randValue()); err != nil {
 						b.Fatal(err)
 					}
 				}
+				b.StopTimer()
+				b.ReportMetric(float64(len(blockstore.data))/float64(t.kcount*1000), "blocks/entry")
+				binarySize, _ := n.checkSize(context.Background())
+				b.ReportMetric(float64(binarySize)/float64(t.kcount*1000), "bytes/entry")
+				b.StartTimer()
+			}
+		})
+	}
+}
+
+// BenchmarkSet creates a large HAMT, then resets the timer, and does another 1000 inserts,
+// measuring the time taken for this second batch of inserts.
+//
+// The number of *additional* blocks per entry is reported.
+func BenchmarkSet(b *testing.B) {
+	for _, t := range benchSetCaseTable {
+		b.Run(fmt.Sprintf("n=%dk/bitwidth=%d", t.kcount, t.bitwidth), func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				r := rander{rand.New(rand.NewSource(int64(i)))}
+				blockstore := newMockBlocks()
+				n := NewNode(cbor.NewCborStore(blockstore), UseTreeBitWidth(t.bitwidth))
+				// Initial fill:
+				for j := 0; j < t.kcount*1000; j++ {
+					if err := n.Set(context.Background(), r.randString(), r.randValue()); err != nil {
+						b.Fatal(err)
+					}
+				}
+				initalBlockstoreSize := len(blockstore.data)
+				b.ResetTimer()
+				// Additional inserts:
+				b.ReportAllocs()
+				for j := 0; j < 1000; j++ {
+					if err := n.Set(context.Background(), r.randString(), r.randValue()); err != nil {
+						b.Fatal(err)
+					}
+				}
+				b.ReportMetric(float64(len(blockstore.data)-initalBlockstoreSize)/float64(1000), "addntlBlocks/addntlEntry")
 			}
 		})
 	}
 }
 
 func BenchmarkFind(b *testing.B) {
-	b.Run("find-10k", doBenchmarkEntriesCount(10000, 8))
-	b.Run("find-100k", doBenchmarkEntriesCount(100000, 8))
-	b.Run("find-1m", doBenchmarkEntriesCount(1000000, 8))
-	b.Run("find-10k-bitwidth-5", doBenchmarkEntriesCount(10000, 5))
-	b.Run("find-100k-bitwidth-5", doBenchmarkEntriesCount(100000, 5))
-	b.Run("find-1m-bitwidth-5", doBenchmarkEntriesCount(1000000, 5))
-
+	for _, t := range benchSetCaseTable {
+		b.Run(fmt.Sprintf("n=%dk/bitwidth=%d", t.kcount, t.bitwidth),
+			doBenchmarkEntriesCount(t.kcount*1000, t.bitwidth))
+	}
 }
 
 func doBenchmarkEntriesCount(num int, bitWidth int) func(b *testing.B) {
