@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/rand"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -36,6 +37,66 @@ func (mb *mockBlocks) Get(c cid.Cid) (block.Block, error) {
 func (mb *mockBlocks) Put(b block.Block) error {
 	mb.data[b.Cid()] = b
 	return nil
+}
+
+func (mb *mockBlocks) totalBlockSizes() int {
+	sum := 0
+	for _, v := range mb.data {
+		sum += len(v.RawData())
+	}
+	return sum
+}
+
+type blockSizesHistogram [12]int
+
+func (mb *mockBlocks) getBlockSizesHistogram() (h blockSizesHistogram) {
+	for _, v := range mb.data {
+		l := len(v.RawData())
+		switch {
+		case l <= 2<<2: // 8
+			h[0]++
+		case l <= 2<<3: // 16
+			h[1]++
+		case l <= 2<<4: // 32
+			h[2]++
+		case l <= 2<<5: // 64
+			h[3]++
+		case l <= 2<<6: // 128
+			h[4]++
+		case l <= 2<<7: // 256
+			h[5]++
+		case l <= 2<<8: // 512
+			h[6]++
+		case l <= 2<<9: // 1024
+			h[7]++
+		case l <= 2<<10: // 2048
+			h[8]++
+		case l <= 2<<11: // 4096
+			h[9]++
+		case l <= 2<<12: // 8192
+			h[10]++
+		default:
+			h[11]++
+		}
+	}
+	return
+}
+
+func (h blockSizesHistogram) String() string {
+	v := "["
+	v += "<=" + strconv.Itoa(2<<2) + ":" + strconv.Itoa(h[0]) + ", "
+	v += "<=" + strconv.Itoa(2<<3) + ":" + strconv.Itoa(h[1]) + ", "
+	v += "<=" + strconv.Itoa(2<<4) + ":" + strconv.Itoa(h[2]) + ", "
+	v += "<=" + strconv.Itoa(2<<5) + ":" + strconv.Itoa(h[3]) + ", "
+	v += "<=" + strconv.Itoa(2<<6) + ":" + strconv.Itoa(h[4]) + ", "
+	v += "<=" + strconv.Itoa(2<<7) + ":" + strconv.Itoa(h[5]) + ", "
+	v += "<=" + strconv.Itoa(2<<8) + ":" + strconv.Itoa(h[6]) + ", "
+	v += "<=" + strconv.Itoa(2<<9) + ":" + strconv.Itoa(h[7]) + ", "
+	v += "<=" + strconv.Itoa(2<<10) + ":" + strconv.Itoa(h[8]) + ", "
+	v += "<=" + strconv.Itoa(2<<11) + ":" + strconv.Itoa(h[9]) + ", "
+	v += "<=" + strconv.Itoa(2<<12) + ":" + strconv.Itoa(h[10]) + ", "
+	v += ">" + strconv.Itoa(2<<12) + ":" + strconv.Itoa(h[11])
+	return v + "]"
 }
 
 func randString() string {

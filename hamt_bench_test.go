@@ -62,15 +62,15 @@ func init() {
 		1,
 		10,
 		100,
-		1000,  // aka 1M
-		10000, // aka 10M -- you'll need a lot of RAM for this.  Also, some patience.
+		1000, // aka 1M
+		//10000, // aka 10M -- you'll need a lot of RAM for this.  Also, some patience.
 	}
 	bitwidths := []int{
 		3,
-		//4,
+		4,
 		5,
-		//6,
-		//7,
+		6,
+		7,
 		8,
 	}
 	// bucketsize-aka-arraywidth?  maybe someday.
@@ -81,13 +81,20 @@ func init() {
 	}
 }
 
-// BenchmarkFill creates a large HAMT, and measures how long it takes to generate all of this many entries.
+// Histograms of blocksizes can be logged from some of the following functions, but are commented out.
+// The main thing to check for in those is whether there are any exceptionally small blocks being produced:
+// less than 64 bytes is a bit concerning because we assume there's some overhead per block in most operations (even if the exact amount may vary situationally).
+// We do see some of these small blocks with small bitwidth parameters (e.g. 3), but almost none with larger bitwidth parameters.
+
+// BenchmarkFill creates a large HAMT, and measures how long it takes to generate all of this many entries;
+// the number of entries is varied in sub-benchmarks, denoted by their "n=" label component.
+// Flush is done once for the entire structure, meaning the number of blocks generated per entry can be much fewer than 1.
 //
 // The number of blocks saved to the blockstore per entry is reported, and the total content size in bytes.
 // The nanoseconds-per-op report on this function is not very useful, because the size of "op" varies with "n" between benchmarks.
 //
-// See "BenchmarkSet" for a probe of how long it takes to set additional entries in an already-large hamt
-// (this gives a more interesting and useful nanoseconds-per-op).
+// See "BenchmarkSet*" for a probe of how long it takes to set additional entries in an already-large hamt
+// (this gives a more interesting and useful nanoseconds-per-op indicators).
 func BenchmarkFill(b *testing.B) {
 	for _, t := range benchSetCaseTable {
 		b.Run(fmt.Sprintf("n=%dk/bitwidth=%d", t.kcount, t.bitwidth), func(b *testing.B) {
@@ -101,21 +108,45 @@ func BenchmarkFill(b *testing.B) {
 						b.Fatal(err)
 					}
 				}
+				if err := n.Flush(context.Background()); err != nil {
+					b.Fatal(err)
+				}
 				b.StopTimer()
 				b.ReportMetric(float64(len(blockstore.data))/float64(t.kcount*1000), "blocks/entry")
 				binarySize, _ := n.checkSize(context.Background())
-				b.ReportMetric(float64(binarySize)/float64(t.kcount*1000), "bytes/entry")
+				b.ReportMetric(float64(binarySize)/float64(t.kcount*1000), "bytes(hamtAccnt)/entry")
+				b.ReportMetric(float64(blockstore.totalBlockSizes())/float64(t.kcount*1000), "bytes(blockstoreAccnt)/entry")
+				if i < 3 {
+					//b.Logf("block size histogram: %v\n", blockstore.getBlockSizesHistogram())
+				}
 				b.StartTimer()
 			}
 		})
 	}
 }
 
-// BenchmarkSet creates a large HAMT, then resets the timer, and does another 1000 inserts,
+// BenchmarkSetBulk creates a large HAMT, then resets the timer, and does another 1000 inserts,
 // measuring the time taken for this second batch of inserts.
+// Flushing happens once after all 1000 inserts.
 //
 // The number of *additional* blocks per entry is reported.
-func BenchmarkSet(b *testing.B) {
+// This number is usually less than one, because the bulk flush means changes might be amortized.
+func BenchmarkSetBulk(b *testing.B) {
+	doBenchmarkSetSuite(b, false)
+}
+
+// BenchmarkSetIndividual is the same as BenchmarkSetBulk, but flushes more.
+// Flush happens per insert.
+//
+// The number of *additional* blocks per entry is reported.
+// Since we flush each insert individually, this number should be at least 1 --
+// however, since we choose random keys, it can still turn out lower if keys happen to collide.
+// (The Set method does not make it possible to adjust our denominator to compensate for this: it does not yield previous values nor indicators of prior presense.)
+func BenchmarkSetIndividual(b *testing.B) {
+	doBenchmarkSetSuite(b, true)
+}
+
+func doBenchmarkSetSuite(b *testing.B, flushPer bool) {
 	for _, t := range benchSetCaseTable {
 		b.Run(fmt.Sprintf("n=%dk/bitwidth=%d", t.kcount, t.bitwidth), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
@@ -128,6 +159,9 @@ func BenchmarkSet(b *testing.B) {
 						b.Fatal(err)
 					}
 				}
+				if err := n.Flush(context.Background()); err != nil {
+					b.Fatal(err)
+				}
 				initalBlockstoreSize := len(blockstore.data)
 				b.ResetTimer()
 				// Additional inserts:
@@ -136,8 +170,23 @@ func BenchmarkSet(b *testing.B) {
 					if err := n.Set(context.Background(), r.randString(), r.randValue()); err != nil {
 						b.Fatal(err)
 					}
+					if flushPer {
+						if err := n.Flush(context.Background()); err != nil {
+							b.Fatal(err)
+						}
+					}
 				}
+				if !flushPer {
+					if err := n.Flush(context.Background()); err != nil {
+						b.Fatal(err)
+					}
+				}
+				b.StopTimer()
 				b.ReportMetric(float64(len(blockstore.data)-initalBlockstoreSize)/float64(1000), "addntlBlocks/addntlEntry")
+				if i < 3 {
+					// b.Logf("block size histogram: %v\n", blockstore.getBlockSizesHistogram())
+				}
+				b.StartTimer()
 			}
 		})
 	}
