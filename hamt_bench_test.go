@@ -60,8 +60,11 @@ var benchSetCaseTable []benchSetCase
 func init() {
 	kCounts := []int{
 		1,
+		5,
 		10,
+		50,
 		100,
+		500,
 		1000, // aka 1M
 		//10000, // aka 10M -- you'll need a lot of RAM for this.  Also, some patience.
 	}
@@ -80,6 +83,16 @@ func init() {
 		}
 	}
 }
+
+// The benchmark results can be graphed.  Here are some reasonable selections:
+/*
+	benchdraw --filter=BenchmarkFill          --plot=line --x=n "--y=blocks/entry"                 < sample > BenchmarkFill-blocks-per-entry-vs-scale.svg
+	benchdraw --filter=BenchmarkFill          --plot=line --x=n "--y=bytes(blockstoreAccnt)/entry" < sample > BenchmarkFill-totalBytes-per-entry-vs-scale.svg
+	benchdraw --filter=BenchmarkSetBulk       --plot=line --x=n "--y=addntlBlocks/addntlEntry"     < sample > BenchmarkSetBulk-addntlBlocks-per-addntlEntry-vs-scale.svg
+	benchdraw --filter=BenchmarkSetIndividual --plot=line --x=n "--y=addntlBlocks/addntlEntry"     < sample > BenchmarkSetIndividual-addntlBlocks-per-addntlEntry-vs-scale.svg
+	benchdraw --filter=BenchmarkFind          --plot=line --x=n "--y=ns/op"                        < sample > BenchmarkFind-speed-vs-scale.svg
+*/
+// (The 'benchdraw' command alluded to here is https://github.com/cep21/benchdraw .)
 
 // Histograms of blocksizes can be logged from some of the following functions, but are commented out.
 // The main thing to check for in those is whether there are any exceptionally small blocks being produced:
