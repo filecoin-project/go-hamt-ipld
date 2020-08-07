@@ -32,7 +32,13 @@ var ErrNotFound = fmt.Errorf("not found")
 // on extremely large (likely impractical) HAMTs that are unable to be
 // represented with the hash function used. Hash functions with larger byte
 // output increase the maximum theoretical depth of a HAMT.
-var ErrMaxDepth = fmt.Errorf("attempted to traverse hamt beyond max depth")
+var ErrMaxDepth = fmt.Errorf("attempted to traverse HAMT beyond max-depth")
+
+// ErrMalformedHamt is returned whenever a block intended as a HAMT node does
+// not conform to the expected form that a block may take. This can occur
+// during block-load where initial validation takes place or during traversal
+// where certain conditions are expected to be met.
+var ErrMalformedHamt = fmt.Errorf("HAMT node was malformed")
 
 //-----------------------------------------------------------------------------
 // Serialized data structures
@@ -302,15 +308,10 @@ func (p *Pointer) loadChild(ctx context.Context, ns cbor.IpldStore, bitWidth int
 		return p.cache, nil
 	}
 
-	out, err := LoadNode(ctx, ns, p.Link)
+	out, err := loadNode(ctx, ns, p.Link, false, bitWidth, hash)
 	if err != nil {
 		return nil, err
 	}
-	// these don't get set in LoadNode because we don't have the Options
-	// at this point but what is inherited from the parents may have varied
-	// from the defaults
-	out.bitWidth = bitWidth
-	out.hash = hash
 
 	p.cache = out
 	return out, nil
@@ -328,31 +329,77 @@ func (p *Pointer) loadChild(ctx context.Context, ns cbor.IpldStore, bitWidth int
 // of this library to remain the defaults long-term and have strategies in
 // place to manage variations.
 func LoadNode(ctx context.Context, cs cbor.IpldStore, c cid.Cid, options ...Option) (*Node, error) {
-	// TODO(rvagg): loaded nodes must be validated to make sure we have only
-	// the correct form of Nodes to avoid attacks from alternative implementations
-	// that feed us poorly formed data. Check that:
-	// 1. Pointers contains the correct number of elements defined by Bitfield
-	// 2. Pointers contain *only* a link or a bucket (this may already be done in
-	// the CBOR unmarshal but might be worth doing here so the check is all in
-	// one place)
-	// 3. Pointers with links have are DAG-CBOR multicodec
-	// 4. KV buckets contain strictly between 1 and bucketSize elements
-	// 5. KV buckets are ordered by key (bytewise comparison)
-	// 6. keys and values are valid (what are the rules? len(key)>0? can val be
-	// nul? etc.)
-	// 7. .. potentially we could validate the position of elements if we propagate
-	// the depth of this node so we know which bits to chomp off the hash digest.
+	return loadNode(ctx, cs, c, true, defaultBitWidth, defaultHashFunction, options...)
+}
+
+// internal version of loadNode that is aware of whether this is a root node or
+// not for the purpose of additional validation on non-root nodes.
+func loadNode(
+	ctx context.Context,
+	cs cbor.IpldStore,
+	c cid.Cid,
+	isRoot bool,
+	bitWidth int,
+	hashFunction func([]byte) []byte,
+	options ...Option,
+) (*Node, error) {
+
 	var out Node
 	if err := cs.Get(ctx, c, &out); err != nil {
 		return nil, err
 	}
 
 	out.store = cs
-	out.bitWidth = defaultBitWidth
-	out.hash = defaultHashFunction
+	out.bitWidth = bitWidth
+	out.hash = hashFunction
 	// apply functional options to node before using
 	for _, option := range options {
 		option(&out)
+	}
+
+	// Validation
+
+	// too many elements in the data array for the configured bitWidth?
+	if len(out.Pointers) > 1<<uint(out.bitWidth) {
+		return nil, ErrMalformedHamt
+	}
+
+	// the bifield is lying or the elements array is
+	if out.bitsSetCount() != len(out.Pointers) {
+		return nil, ErrMalformedHamt
+	}
+
+	for _, ch := range out.Pointers {
+		isLink := ch.isShard()
+		isBucket := ch.KVs != nil
+		if !((isLink && !isBucket) || (!isLink && isBucket)) {
+			return nil, ErrMalformedHamt
+		}
+		if isLink && ch.Link.Type() != cid.DagCBOR { // not dag-cbor
+			return nil, ErrMalformedHamt
+		}
+		if isBucket {
+			if len(ch.KVs) == 0 || len(ch.KVs) > bucketSize {
+				return nil, ErrMalformedHamt
+			}
+			for i := 1; i < len(ch.KVs); i++ {
+				if bytes.Compare(ch.KVs[i-1].Key, ch.KVs[i].Key) >= 0 {
+					return nil, ErrMalformedHamt
+				}
+			}
+		}
+	}
+
+	if !isRoot {
+		// the only valid empty node is a root node
+		if len(out.Pointers) == 0 {
+			return nil, ErrMalformedHamt
+		}
+		// a non-root node that contains <=bucketSize direct elements should not
+		// exist under compaction rules
+		if out.directChildCount() == 0 && out.directKVCount() <= bucketSize {
+			return nil, ErrMalformedHamt
+		}
 	}
 
 	return &out, nil
@@ -488,12 +535,7 @@ func (n *Node) cleanChild(chnd *Node, cindex byte) error {
 		return nil
 	}
 
-	l := len(chnd.Pointers)
-	if l == 0 {
-		return fmt.Errorf("incorrectly formed HAMT")
-	}
-
-	if l == 1 {
+	if len(chnd.Pointers) == 1 {
 		// The case where the child node has a single bucket, which we know can
 		// only contain `bucketSize` elements (maximum), so we need to pull that
 		// bucket up into this node.
