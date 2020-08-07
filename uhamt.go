@@ -8,6 +8,10 @@ import (
 // indexForBitPos returns the index within the collapsed array corresponding to
 // the given bit in the bitset.  The collapsed array contains only one entry
 // per bit set in the bitfield, and this function is used to map the indices.
+// This is similar to a popcount() operation but is limited to a certain index.
+// e.g. a Bitfield of `10010110000` shows that we have a 4 elements in the
+// associated array. Indexes `[1]` and `[2]` are not present, but index `[3]`
+// is at the second position of our Pointers array.
 func (n *Node) indexForBitPos(bp int) int {
 	return indexForBitPos(bp, n.Bitfield)
 }
