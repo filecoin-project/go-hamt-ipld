@@ -125,13 +125,18 @@ func BenchmarkFill(b *testing.B) {
 					b.Fatal(err)
 				}
 				b.StopTimer()
+				if i < 3 {
+					//b.Logf("block size histogram: %v\n", blockstore.getBlockSizesHistogram())
+				}
+				if blockstore.stats.evtcntPutDup > 0 {
+					b.Logf("on round N=%d: blockstore stats: %#v\n", b.N, blockstore.stats) // note: must refer to this before doing `n.checkSize`; that function has many effects.
+				}
+				b.ReportMetric(float64(blockstore.stats.evtcntGet)/float64(t.kcount*1000), "getEvts/entry")
+				b.ReportMetric(float64(blockstore.stats.evtcntPut)/float64(t.kcount*1000), "putEvts/entry")
 				b.ReportMetric(float64(len(blockstore.data))/float64(t.kcount*1000), "blocks/entry")
 				binarySize, _ := n.checkSize(context.Background())
 				b.ReportMetric(float64(binarySize)/float64(t.kcount*1000), "bytes(hamtAccnt)/entry")
 				b.ReportMetric(float64(blockstore.totalBlockSizes())/float64(t.kcount*1000), "bytes(blockstoreAccnt)/entry")
-				if i < 3 {
-					//b.Logf("block size histogram: %v\n", blockstore.getBlockSizesHistogram())
-				}
 				b.StartTimer()
 			}
 		})
@@ -177,6 +182,7 @@ func doBenchmarkSetSuite(b *testing.B, flushPer bool) {
 				}
 				initalBlockstoreSize := len(blockstore.data)
 				b.ResetTimer()
+				blockstore.stats = blockstoreStats{}
 				// Additional inserts:
 				b.ReportAllocs()
 				for j := 0; j < 1000; j++ {
@@ -195,10 +201,15 @@ func doBenchmarkSetSuite(b *testing.B, flushPer bool) {
 					}
 				}
 				b.StopTimer()
-				b.ReportMetric(float64(len(blockstore.data)-initalBlockstoreSize)/float64(1000), "addntlBlocks/addntlEntry")
 				if i < 3 {
 					// b.Logf("block size histogram: %v\n", blockstore.getBlockSizesHistogram())
 				}
+				if blockstore.stats.evtcntPutDup > 0 {
+					b.Logf("on round N=%d: blockstore stats: %#v\n", b.N, blockstore.stats)
+				}
+				b.ReportMetric(float64(blockstore.stats.evtcntGet)/float64(t.kcount*1000), "getEvts/entry")
+				b.ReportMetric(float64(blockstore.stats.evtcntPut)/float64(t.kcount*1000), "putEvts/entry")
+				b.ReportMetric(float64(len(blockstore.data)-initalBlockstoreSize)/float64(1000), "addntlBlocks/addntlEntry")
 				b.StartTimer()
 			}
 		})

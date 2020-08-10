@@ -19,14 +19,16 @@ import (
 )
 
 type mockBlocks struct {
-	data map[cid.Cid]block.Block
+	data  map[cid.Cid]block.Block
+	stats blockstoreStats
 }
 
 func newMockBlocks() *mockBlocks {
-	return &mockBlocks{make(map[cid.Cid]block.Block)}
+	return &mockBlocks{make(map[cid.Cid]block.Block), blockstoreStats{}}
 }
 
 func (mb *mockBlocks) Get(c cid.Cid) (block.Block, error) {
+	mb.stats.evtcntGet++
 	d, ok := mb.data[c]
 	if ok {
 		return d, nil
@@ -35,8 +37,18 @@ func (mb *mockBlocks) Get(c cid.Cid) (block.Block, error) {
 }
 
 func (mb *mockBlocks) Put(b block.Block) error {
+	mb.stats.evtcntPut++
+	if _, exists := mb.data[b.Cid()]; exists {
+		mb.stats.evtcntPutDup++
+	}
 	mb.data[b.Cid()] = b
 	return nil
+}
+
+type blockstoreStats struct {
+	evtcntGet    int
+	evtcntPut    int
+	evtcntPutDup int
 }
 
 func (mb *mockBlocks) totalBlockSizes() int {
