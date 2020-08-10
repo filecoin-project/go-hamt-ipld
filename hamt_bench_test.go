@@ -91,6 +91,7 @@ func init() {
 	benchdraw --filter=BenchmarkSetBulk       --plot=line --x=n "--y=addntlBlocks/addntlEntry"     < sample > BenchmarkSetBulk-addntlBlocks-per-addntlEntry-vs-scale.svg
 	benchdraw --filter=BenchmarkSetIndividual --plot=line --x=n "--y=addntlBlocks/addntlEntry"     < sample > BenchmarkSetIndividual-addntlBlocks-per-addntlEntry-vs-scale.svg
 	benchdraw --filter=BenchmarkFind          --plot=line --x=n "--y=ns/op"                        < sample > BenchmarkFind-speed-vs-scale.svg
+	benchdraw --filter=BenchmarkFind          --plot=line --x=n "--y=getEvts/find"                 < sample > BenchmarkFind-getEvts-vs-scale.svg
 */
 // (The 'benchdraw' command alluded to here is https://github.com/cep21/benchdraw .)
 
@@ -226,7 +227,8 @@ func BenchmarkFind(b *testing.B) {
 func doBenchmarkEntriesCount(num int, bitWidth int) func(b *testing.B) {
 	r := rander{rand.New(rand.NewSource(int64(num)))}
 	return func(b *testing.B) {
-		cs := cbor.NewCborStore(newMockBlocks())
+		blockstore := newMockBlocks()
+		cs := cbor.NewCborStore(blockstore)
 		n := NewNode(cs, UseTreeBitWidth(bitWidth))
 
 		var keys []string
@@ -248,6 +250,7 @@ func doBenchmarkEntriesCount(num int, bitWidth int) func(b *testing.B) {
 		}
 
 		runtime.GC()
+		blockstore.stats = blockstoreStats{}
 		b.ResetTimer()
 		b.ReportAllocs()
 
@@ -261,5 +264,7 @@ func doBenchmarkEntriesCount(num int, bitWidth int) func(b *testing.B) {
 				b.Fatal(err)
 			}
 		}
+		b.ReportMetric(float64(blockstore.stats.evtcntGet)/float64(b.N), "getEvts/find")
+		b.ReportMetric(float64(blockstore.stats.evtcntPut)/float64(b.N), "putEvts/find") // surely this is zero, but for completeness.
 	}
 }
