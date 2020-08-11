@@ -904,10 +904,9 @@ func TestMalformedHamt(t *testing.T) {
 				bcat(b(0x40+1), b(kv.key)),    // bytes(1) "\x??"
 				bcat(b(0x40+1), b(kv.value)))) // bytes(1) "\x??"
 		}
-		return bcat(b(0xa0+1), // map(1)
-			bcat(b(0x60+1), b(0x31)), // string(1) "1"
-			bcat(b(0x80+byte(len(kvs))), // array(?)
-				en)) // bucket contents
+		return bcat(
+			b(0x80+byte(len(kvs))), // array(?)
+			en)                     // bucket contents
 	}
 
 	// most minimal HAMT node with one k/v entry, sanity check we can load this
@@ -964,53 +963,15 @@ func TestMalformedHamt(t *testing.T) {
 		t.Fatal("Should have returned ErrMalformedHamt for mismatch bitfield count")
 	}
 
-	// test mixed link & bucket
-
-	// this node contains 2 elements, the first is a plain entry with one bucket
-	// and with a single key of 0x0100, the second element is a link to a child
-	// node which happens to be the same CID as this node will be stored in.
-	// However, this second entry has both a CID and a bucket in the same
-	// element, which is not allowed. Without checks for exactly one of these
-	// two things then then a lookup for key 0x0100 would navigate through this
-	// node and back again as its own child to the first element.
-	store(
-		bcat(b(0x80+2), // array(2)
-			bcat(b(0x40+1), b(0x03)), // bytes(1) "\x03" (bitmap)
-			bcat(b(0x80+2), // array(2)
-				bcat(b(0xa0+1), // map(1)
-					bcat(b(0x60+1), b(0x31)), // string(1) "1"
-					bcat(b(0x80+1), // array(1)
-						bcat(b(0x80+2), // array(2)
-							bcat(b(0x40+2), []byte{0x01, 0x00}), // bytes(2) "\x0100"
-							bcat(b(0x40+1), b(0xff))))),         // bytes(1) "\xff"
-				bcat(b(0xa0+2), // map(2)
-					bcat(b(0x60+1), b(0x30)), // string(1) "0"
-					bcat(b(0xd8), b(0x2a), // tag(42)
-						b(0x58), b(0x27), // bytes(39)
-						cidBytes), // cid
-					bcat(b(0x60+1), b(0x31)), // string(1) "1"
-					bcat(b(0x80+1), // array(1)
-						bcat(b(0x80+2), // array(2)
-							bcat(b(0x40+1), b(0x01)),      // bytes(1) "\x00"
-							bcat(b(0x40+1), b(0xfe)))))))) // bytes(1) "\xff
-
-	n, err = LoadNode(ctx, cs, bcid, UseTreeBitWidth(8), UseHashFunction(identityHash))
-	if err == nil || n != nil || err.Error() != "Pointers should be a single element map" {
-		// no ErrMalformedHamt here possible bcause of cbor-gen wrapping
-		t.Fatal("Should have returned error for bad Pointer cbor")
-	}
-
 	// test pointers with links have are DAG-CBOR multicodec
 	// sanity check minimal node pointing to a child node
 	store(
 		bcat(b(0x80+2), // array(2)
 			bcat(b(0x40+1), b(0x01)), // bytes(1) "\x01" (bitmap)
 			bcat(b(0x80+1), // array(1)
-				bcat(b(0xa0+1), // map(1)
-					bcat(b(0x60+1), b(0x30)), // string(1) "0"
-					bcat(b(0xd8), b(0x2a), // tag(42)
-						b(0x58), b(0x27), // bytes(39)
-						cidBytes))))) // cid
+				bcat(b(0xd8), b(0x2a), // tag(42)
+					b(0x58), b(0x27), // bytes(39)
+					cidBytes)))) // cid
 	load()
 
 	// node pointing to a non-dag-cbor node
@@ -1018,11 +979,9 @@ func TestMalformedHamt(t *testing.T) {
 		bcat(b(0x80+2), // array(2)
 			bcat(b(0x40+1), b(0x01)), // bytes(1) "\x01" (bitmap)
 			bcat(b(0x80+1), // array(1)
-				bcat(b(0xa0+1), // map(1)
-					bcat(b(0x60+1), b(0x30)), // string(1) "0"
-					bcat(b(0xd8), b(0x2a), // tag(42)
-						b(0x58), b(0x27), // bytes(39)
-						badCidBytes))))) // cid
+				bcat(b(0xd8), b(0x2a), // tag(42)
+					b(0x58), b(0x27), // bytes(39)
+					badCidBytes)))) // cid
 	n, err = LoadNode(ctx, cs, bcid, UseTreeBitWidth(8), UseHashFunction(identityHash))
 	if err != ErrMalformedHamt || n != nil {
 		t.Fatal("Should have returned ErrMalformedHamt for bad child link codec")
@@ -1102,11 +1061,9 @@ func TestMalformedHamt(t *testing.T) {
 		bcat(b(0x80+2), // array(2)
 			bcat(b(0x40+1), b(0x01)), // bytes(1) "\x01" (bitmap)
 			bcat(b(0x80+1), // array(1)
-				bcat(b(0xa0+1), // map(1)
-					bcat(b(0x60+1), b(0x30)), // string(1) "0"
-					bcat(b(0xd8), b(0x2a), // tag(42)
-						b(0x58), b(0x27), // bytes(39)
-						ccidBytes))))) // cid
+				bcat(b(0xd8), b(0x2a), // tag(42)
+					b(0x58), b(0x27), // bytes(39)
+					ccidBytes)))) // cid
 
 	vg, err := load().FindRaw(ctx, string([]byte{0x00, 0x01}))
 	// without validation of the child block, this would return an ErrNotFound
@@ -1145,17 +1102,13 @@ func TestMalformedHamt(t *testing.T) {
 		bcat(b(0x80+2), // array(2)
 			bcat(b(0x40+1), b(0x03)), // bytes(1) "\x03" (bitmap)
 			bcat(b(0x80+2), // array(2)
-				bcat(b(0xa0+1), // map(1)
-					bcat(b(0x60+1), b(0x31)), // string(1) "1"
-					bcat(b(0x80+1), // array(1)
-						bcat(b(0x80+2), // array(2)
-							bcat(b(0x40+2), []byte{0x00, 0x01}), // bytes(2) "\x0001"
-							bcat(b(0x40+1), b(0xff))))),         // bytes(1) "\xff"
-				bcat(b(0xa0+1), // map(1)
-					bcat(b(0x60+1), b(0x30)), // string(1) "0"
-					bcat(b(0xd8), b(0x2a), // tag(42)
-						b(0x58), b(0x27), // bytes(39)
-						ccidBytes))))) // cid
+				bcat(b(0x80+1), // array(1)
+					bcat(b(0x80+2), // array(2)
+						bcat(b(0x40+2), []byte{0x00, 0x01}), // bytes(2) "\x0001"
+						bcat(b(0x40+1), b(0xff)))),          // bytes(1) "\xff"
+				bcat(b(0xd8), b(0x2a), // tag(42)
+					b(0x58), b(0x27), // bytes(39)
+					ccidBytes)))) // cid
 
 	vg, err = load().FindRaw(ctx, string([]byte{0x00, 0x01}))
 	// without validation of the child block, this would return an ErrNotFound
