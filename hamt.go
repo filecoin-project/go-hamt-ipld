@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"math/big"
 	"sort"
 
 	cid "github.com/ipfs/go-cid"
@@ -70,8 +69,8 @@ var ErrMalformedHamt = fmt.Errorf("HAMT node was malformed")
 // 			pointers [Pointer]
 // 		} representation tuple
 type Node struct {
-	Bitfield *big.Int   `refmt:"bf"`
-	Pointers []*Pointer `refmt:"p"`
+	Bitfield *Bitmap
+	Pointers []*Pointer
 
 	bitWidth int
 	hash     func([]byte) []byte
@@ -202,17 +201,23 @@ func UseHashFunction(hash func([]byte) []byte) Option {
 // This function creates a new HAMT that you can use directly and is also
 // used internally to create child nodes.
 func NewNode(cs cbor.IpldStore, options ...Option) *Node {
+	return newNode(cs, defaultBitWidth, defaultHashFunction, options...)
+}
+
+// internal version of NewNode that will properly set up defaults and correct
+// size bitfield for the supplied parameters
+func newNode(cs cbor.IpldStore, bitWidth int, hashFunction func([]byte) []byte, options ...Option) *Node {
 	nd := &Node{
-		Bitfield: big.NewInt(0),
 		Pointers: make([]*Pointer, 0),
 		store:    cs,
-		hash:     defaultHashFunction,
-		bitWidth: defaultBitWidth,
+		hash:     hashFunction,
+		bitWidth: bitWidth,
 	}
 	// apply functional options to node before using
 	for _, option := range options {
 		option(nd)
 	}
+	nd.Bitfield = NewBitmap(nd.bitWidth)
 	return nd
 }
 
@@ -284,14 +289,14 @@ func (n *Node) getValue(ctx context.Context, hv *hashBits, k string, cb func(*KV
 
 	// if the element expected at this node isn't here then we can be sure it
 	// doesn't exist in the HAMT.
-	if n.Bitfield.Bit(idx) == 0 {
+	if !n.Bitfield.IsSet(idx) {
 		return ErrNotFound
 	}
 
 	// otherwise, the value is either local or in a child
 
 	// perform a popcount of bits up to the `idx` to find `cindex`
-	cindex := byte(n.indexForBitPos(idx))
+	cindex := byte(n.Bitfield.Index(idx))
 
 	c := n.getPointer(cindex)
 	if c.isShard() {
@@ -348,7 +353,7 @@ func LoadNode(ctx context.Context, cs cbor.IpldStore, c cid.Cid, options ...Opti
 	return loadNode(ctx, cs, c, true, defaultBitWidth, defaultHashFunction, options...)
 }
 
-// internal version of loadNode that is aware of whether this is a root node or
+// internal version of LoadNode that is aware of whether this is a root node or
 // not for the purpose of additional validation on non-root nodes.
 func loadNode(
 	ctx context.Context,
@@ -380,8 +385,13 @@ func loadNode(
 		return nil, ErrMalformedHamt
 	}
 
+	// bitmap needs to be exactly the right number of bytes
+	if out.Bitfield.BitWidth() != out.bitWidth {
+		return nil, ErrMalformedHamt
+	}
+
 	// the bifield is lying or the elements array is
-	if out.bitsSetCount() != len(out.Pointers) {
+	if out.Bitfield.BitsSetCount() != len(out.Pointers) {
 		return nil, ErrMalformedHamt
 	}
 
@@ -623,14 +633,14 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.D
 	// if the element expected at this node isn't here then we can be sure it
 	// doesn't exist in the HAMT already and can insert it at the appropriate
 	// position.
-	if n.Bitfield.Bit(idx) != 1 {
+	if !n.Bitfield.IsSet(idx) {
 		return n.insertKV(idx, k, v)
 	}
 
 	// otherwise, the value is either local or in a child
 
 	// perform a popcount of bits up to the `idx` to find `cindex`
-	cindex := byte(n.indexForBitPos(idx))
+	cindex := byte(n.Bitfield.Index(idx))
 
 	child := n.getPointer(cindex)
 	if child.isShard() {
@@ -698,9 +708,7 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.D
 	if len(child.KVs) >= bucketSize {
 		// bucket is full, create a child node (shard) with all existing bucket
 		// elements plus the new one and set it in the place of the bucket
-		sub := NewNode(n.store)
-		sub.bitWidth = n.bitWidth
-		sub.hash = n.hash
+		sub := newNode(n.store, n.bitWidth, n.hash)
 		hvcopy := &hashBits{b: hv.b, consumed: hv.consumed}
 		if err := sub.modifyValue(ctx, hvcopy, k, v); err != nil {
 			return err
@@ -737,8 +745,8 @@ func (n *Node) insertKV(idx int, k []byte, v *cbg.Deferred) error {
 		return ErrNotFound
 	}
 
-	i := n.indexForBitPos(idx)
-	n.Bitfield.SetBit(n.Bitfield, idx, 1)
+	i := n.Bitfield.Index(idx)
+	n.Bitfield.Set(idx, true)
 
 	p := &Pointer{KVs: []*KV{{Key: k, Value: v}}}
 
@@ -760,7 +768,7 @@ func (n *Node) setPointer(i byte, p *Pointer) error {
 func (n *Node) rmPointer(i byte, idx int) error {
 	copy(n.Pointers[i:], n.Pointers[i+1:])
 	n.Pointers = n.Pointers[:len(n.Pointers)-1]
-	n.Bitfield.SetBit(n.Bitfield, idx, 0)
+	n.Bitfield.Set(idx, false)
 
 	return nil
 }
@@ -785,10 +793,8 @@ func (n *Node) getPointer(i byte) *Pointer {
 // as cached nodes.
 func (n *Node) Copy() *Node {
 	// TODO(rvagg): clarify what situations this method is actually useful for.
-	nn := NewNode(n.store)
-	nn.bitWidth = n.bitWidth
-	nn.hash = n.hash
-	nn.Bitfield.Set(n.Bitfield)
+	nn := newNode(n.store, n.bitWidth, n.hash)
+	nn.Bitfield = n.Bitfield.Copy()
 	nn.Pointers = make([]*Pointer, len(n.Pointers))
 
 	for i, p := range n.Pointers {

@@ -7,6 +7,8 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"math/big"
+	"math/bits"
 	"math/rand"
 	"strconv"
 	"strings"
@@ -935,6 +937,9 @@ func TestMalformedHamt(t *testing.T) {
 	blocks := newMockBlocks()
 	cs := cbor.NewCborStore(blocks)
 	bcid, err := cid.Decode("bafy2bzaceab7vkg5c3zti7ebqensb3onksjkc4wwktkiledkezgvnbvzs4cti")
+	if err != nil {
+		t.Fatal(err)
+	}
 	bccid, err := cid.Decode("bafy2bzaceab7vkg5c3zti7ebqensb3onksjkc4wwktkiledkezgvnbvzs4cqa")
 	if err != nil {
 		t.Fatal(err)
@@ -950,15 +955,15 @@ func TestMalformedHamt(t *testing.T) {
 	store := func(blob []byte) {
 		blocks.data[bcid] = block.NewBlock(blob)
 	}
-	load := func() *Node {
-		n, err := LoadNode(ctx, cs, bcid, UseTreeBitWidth(8), UseHashFunction(identityHash))
+	load := func(bitWidth int) *Node {
+		n, err := LoadNode(ctx, cs, bcid, UseTreeBitWidth(bitWidth), UseHashFunction(identityHash))
 		if err != nil {
 			t.Fatal(err)
 		}
 		return n
 	}
-	find := func(key []byte, expected []byte) *[]byte {
-		vg, err := load().FindRaw(ctx, string(key))
+	find := func(nd *Node, key []byte, expected []byte) *[]byte {
+		vg, err := nd.FindRaw(ctx, string(key))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -993,36 +998,44 @@ func TestMalformedHamt(t *testing.T) {
 			bcat(b(0x80+1), // array(1)
 				bucketCbor(kv{0x00, 0xff})))) // 0x00=0xff
 	// should find a bytes(1) "\xff"
-	find(b(0x00), bcat(b(0x40+1), b(0xff)))
+	find(load(3), b(0x00), bcat(b(0x40+1), b(0xff)))
 	// print the raw cbor: fmt.Printf("%v\n", hex.EncodeToString(blocks.data[bcid].RawData()))
 
-	// 10 entry node, assumed bitwidth of >3
+	// 10 entry node, assumed bitwidth of 4
 	store(
 		bcat(b(0x80+2), // array(2)
 			bcat(b(0x40+2), []byte{0x03, 0xff}), // bytes(1) "\x3ff" (bitmap with lower 10 bits set)
 			bcat(b(0x80+10), // array(10)
-				bucketCbor(kv{0x00, 0xf0}),   // 0x00=0xf0
-				bucketCbor(kv{0x01, 0xf1}),   // 0x01=0xf1
-				bucketCbor(kv{0x02, 0xf2}),   // 0x02=0xf2
-				bucketCbor(kv{0x03, 0xf3}),   // 0x03=0xf3
-				bucketCbor(kv{0x04, 0xf4}),   // 0x04=0xf4
-				bucketCbor(kv{0x05, 0xf5}),   // 0x05=0xf5
-				bucketCbor(kv{0x06, 0xf6}),   // 0x06=0xf6
-				bucketCbor(kv{0x07, 0xf7}),   // 0x07=0xf7
-				bucketCbor(kv{0x08, 0xf8}),   // 0x08=0xf8
-				bucketCbor(kv{0x09, 0xf9})))) // 0x09=0xf9
+				// shift these indexes up by 4 because with a bitWidth of 4 we are
+				// chomping the top bits first
+				bucketCbor(kv{0x00 << 4, 0xf0}),   // 0x00=0xf0
+				bucketCbor(kv{0x01 << 4, 0xf1}),   // 0x01=0xf1
+				bucketCbor(kv{0x02 << 4, 0xf2}),   // 0x02=0xf2
+				bucketCbor(kv{0x03 << 4, 0xf3}),   // 0x03=0xf3
+				bucketCbor(kv{0x04 << 4, 0xf4}),   // 0x04=0xf4
+				bucketCbor(kv{0x05 << 4, 0xf5}),   // 0x05=0xf5
+				bucketCbor(kv{0x06 << 4, 0xf6}),   // 0x06=0xf6
+				bucketCbor(kv{0x07 << 4, 0xf7}),   // 0x07=0xf7
+				bucketCbor(kv{0x08 << 4, 0xf8}),   // 0x08=0xf8
+				bucketCbor(kv{0x09 << 4, 0xf9})))) // 0x09=0xf9
 	// sanity check
 	for i := 0; i < 10; i++ {
 		v := bcat(b(0x40+1), b(0xf0+byte(i)))
-		if vg := find(b(0x00+byte(i)), v); vg != nil {
+		if vg := find(load(4), b(byte(i<<4)), v); vg != nil {
 			t.Fatalf("expected a value of %v, got %v", hex.EncodeToString(v), hex.EncodeToString(*vg))
 		}
 	}
 
-	// load as bitWidth=3, which can only handle a max of 8 elements
+	// load as bitWidth=3 which needs a 1-byte index
 	n, err := LoadNode(ctx, cs, bcid, UseTreeBitWidth(3), UseHashFunction(identityHash))
 	if err != ErrMalformedHamt || n != nil {
 		t.Fatal("Should have returned ErrMalformedHamt for too-small bitWidth")
+	}
+
+	// load as bitWidth=5 which needs a 4-byte index
+	n, err = LoadNode(ctx, cs, bcid, UseTreeBitWidth(5), UseHashFunction(identityHash))
+	if err != ErrMalformedHamt || n != nil {
+		t.Fatal("Should have returned ErrMalformedHamt for too-large bitWidth")
 	}
 
 	// test that the bitfield set count matches array size
@@ -1087,7 +1100,7 @@ func TestMalformedHamt(t *testing.T) {
 					bcat(b(0xd8), b(0x2a), // tag(42)
 						b(0x58), b(0x27), // bytes(39)
 						cidBytes))))) // cid
-	load()
+	load(3)
 
 	// node pointing to a non-dag-cbor node
 	store(
@@ -1110,7 +1123,7 @@ func TestMalformedHamt(t *testing.T) {
 			bcat(b(0x40+1), b(0x01)), // bytes(1) "\x01" (bitmap)
 			bcat(b(0x80+1), // array(1)
 				bucketCbor()))) // empty bucket
-	n, err = LoadNode(ctx, cs, bcid, UseTreeBitWidth(8), UseHashFunction(identityHash))
+	n, err = LoadNode(ctx, cs, bcid, UseTreeBitWidth(3), UseHashFunction(identityHash))
 	if err != ErrMalformedHamt || n != nil {
 		t.Fatal("Should have returned ErrMalformedHamt for zero element bucket")
 	}
@@ -1126,7 +1139,7 @@ func TestMalformedHamt(t *testing.T) {
 					kv{0x02, 0xff},
 					kv{0x03, 0xff})))) // bucket with 4 entires
 
-	n, err = LoadNode(ctx, cs, bcid, UseTreeBitWidth(8), UseHashFunction(identityHash))
+	n, err = LoadNode(ctx, cs, bcid, UseTreeBitWidth(3), UseHashFunction(identityHash))
 	if err != ErrMalformedHamt || n != nil {
 		t.Fatal("Should have returned ErrMalformedHamt for four element bucket")
 	}
@@ -1141,7 +1154,7 @@ func TestMalformedHamt(t *testing.T) {
 					kv{0x01, 0xff},
 					kv{0x00, 0xff})))) // bucket with 2, misordered entries
 
-	n, err = LoadNode(ctx, cs, bcid, UseTreeBitWidth(8), UseHashFunction(identityHash))
+	n, err = LoadNode(ctx, cs, bcid, UseTreeBitWidth(3), UseHashFunction(identityHash))
 	if err != ErrMalformedHamt || n != nil {
 		t.Fatal("Should have returned ErrMalformedHamt for mis-ordered bucket")
 	}
@@ -1156,7 +1169,7 @@ func TestMalformedHamt(t *testing.T) {
 					kv{0x01, 0xf0},
 					kv{0x01, 0xff})))) // bucket with 3 element, 2 dupes with different values
 
-	n, err = LoadNode(ctx, cs, bcid, UseTreeBitWidth(8), UseHashFunction(identityHash))
+	n, err = LoadNode(ctx, cs, bcid, UseTreeBitWidth(3), UseHashFunction(identityHash))
 	if err != ErrMalformedHamt || n != nil {
 		t.Fatal("Should have returned ErrMalformedHamt for mis-ordered bucket")
 	}
@@ -1166,7 +1179,7 @@ func TestMalformedHamt(t *testing.T) {
 		bcat(b(0x80+2), // array(2)
 			bcat(b(0x40+1), b(0x00)), // bytes(1) "\x00" (bitmap)
 			bcat(b(0x80+0))))         // array(0)
-	load()
+	load(3)
 
 	// make a child empty block and point to it in a root
 	blocks.data[bccid] = block.NewBlock(
@@ -1184,7 +1197,7 @@ func TestMalformedHamt(t *testing.T) {
 						b(0x58), b(0x27), // bytes(39)
 						ccidBytes))))) // cid
 
-	vg, err := load().FindRaw(ctx, string([]byte{0x00, 0x01}))
+	vg, err := load(3).FindRaw(ctx, string([]byte{0x00, 0x01}))
 	// without validation of the child block, this would return an ErrNotFound
 	if err != ErrMalformedHamt || vg != nil {
 		t.Fatal("Should have returned ErrMalformedHamt for its empty child node")
@@ -1196,7 +1209,7 @@ func TestMalformedHamt(t *testing.T) {
 			bcat(b(0x40+1), b(0x01)), // bytes(1) "\x01" (bitmap)
 			bcat(b(0x80+1), // array(1)
 				bucketCbor(kv{0x00, 0x01}))))
-	vg, err = load().FindRaw(ctx, string([]byte{0x00, 0x01}))
+	vg, err = load(3).FindRaw(ctx, string([]byte{0x00, 0x01}))
 	// without validation of the child block, this would return an ErrNotFound
 	if err != ErrMalformedHamt || vg != nil {
 		t.Fatal("Should have returned ErrMalformedHamt for its too-small child node")
@@ -1204,19 +1217,19 @@ func TestMalformedHamt(t *testing.T) {
 
 	blocks.data[bccid] = block.NewBlock(
 		bcat(b(0x80+2), // array(2)
-			bcat(b(0x40+1), b(0x01)), // bytes(1) "\x01" (bitmap)
+			bcat(b(0x40+1), b(0x07)), // bytes(1) "\x07" (bitmap)
 			bcat(b(0x80+3), // array(1)
 				bucketCbor(kv{0x00, 0x01}),
 				bucketCbor(kv{0x01, 0x01}),
 				bucketCbor(kv{0x02, 0x01}))))
-	vg, err = load().FindRaw(ctx, string([]byte{0x00, 0x01}))
+	vg, err = load(3).FindRaw(ctx, string([]byte{0x00, 0x01}))
 	// without validation of the child block, this would return an ErrNotFound
 	if err != ErrMalformedHamt || vg != nil {
 		t.Fatal("Should have returned ErrMalformedHamt for its too-small child node")
 	}
 
-	// same as the above case, too few direct entries, but this one has a link in
-	// it to a child so we can't perform this check, so this should work
+	// same as the above case, too few direct entries, but this one has a link
+	// in it to a child so we can't perform this check, so this should work
 	blocks.data[bccid] = block.NewBlock(
 		bcat(b(0x80+2), // array(2)
 			bcat(b(0x40+1), b(0x03)), // bytes(1) "\x03" (bitmap)
@@ -1233,7 +1246,7 @@ func TestMalformedHamt(t *testing.T) {
 						b(0x58), b(0x27), // bytes(39)
 						ccidBytes))))) // cid
 
-	vg, err = load().FindRaw(ctx, string([]byte{0x00, 0x01}))
+	vg, err = load(3).FindRaw(ctx, string([]byte{0x00, 0x01}))
 	// without validation of the child block, this would return an ErrNotFound
 	if err != nil && bytes.Compare(vg, []byte{0x40 + 2, 0x00, 0x01}) != 0 {
 		t.Fatal("Should have returned found entry")
@@ -1307,4 +1320,60 @@ func TestCleanChildOrdering(t *testing.T) {
 	require.NoError(t, err)
 	h, err = LoadNode(ctx, cs, root, hamtOptions...)
 	assert.NoError(t, err)
+}
+
+func TestIndexForBitRandom(t *testing.T) {
+	t.Parallel()
+	r := rand.New(rand.NewSource(int64(42)))
+
+	count := 100000
+	slot := make([]byte, 32)
+	for i := 0; i < count; i++ {
+		_, err := r.Read(slot)
+		if err != nil {
+			t.Fatal("couldn't create random bitfield")
+		}
+		bi := big.NewInt(0).SetBytes(slot)
+		bm := NewBitmapFrom(slot)
+		for k := 0; k < 256; k++ {
+			if indexForBitPosOriginal(k, bi) != bm.Index(k) {
+				t.Fatalf("indexForBit doesn't match with new")
+			}
+		}
+	}
+}
+
+func TestIndexForBitLinear(t *testing.T) {
+	t.Parallel()
+	var i int64
+	for i = 0; i < 1<<16-1; i++ {
+		bi := big.NewInt(i)
+		// turn the bigint into a proper 8 byte slice
+		bib := bi.Bytes()
+		if len(bib) < 8 {
+			bib = append(make([]byte, 8-len(bib)), bib...)
+		}
+		bm := NewBitmapFrom(bib)
+		for k := 0; k < 16; k++ {
+			if indexForBitPosOriginal(k, bi) != bm.Index(k) {
+				t.Fatalf("indexForBit doesn't match with new")
+			}
+		}
+	}
+}
+
+// Original implementation of indexForBit, before #39.
+func indexForBitPosOriginal(bp int, bitfield *big.Int) int {
+	mask := new(big.Int).Sub(new(big.Int).Exp(big.NewInt(2), big.NewInt(int64(bp)), nil), big.NewInt(1))
+	mask.And(mask, bitfield)
+
+	return popCount(mask)
+}
+
+func popCount(i *big.Int) int {
+	var n int
+	for _, v := range i.Bits() {
+		n += bits.OnesCount64(uint64(v))
+	}
+	return n
 }

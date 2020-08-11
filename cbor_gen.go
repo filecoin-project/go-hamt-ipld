@@ -5,7 +5,6 @@ package hamt
 import (
 	"fmt"
 	"io"
-	"math/big"
 
 	cbg "github.com/whyrusleeping/cbor-gen"
 	xerrors "golang.org/x/xerrors"
@@ -35,7 +34,7 @@ func (t *Node) MarshalCBOR(w io.Writer) error {
 	{
 		var b []byte
 		if t.Bitfield != nil {
-			b = t.Bitfield.Bytes()
+			b = t.Bitfield.Bytes
 		}
 
 		if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajByteString, uint64(len(b))); err != nil {
@@ -92,7 +91,11 @@ func (t *Node) UnmarshalCBOR(r io.Reader) error {
 	}
 
 	if extra > 256 {
-		return fmt.Errorf("t.Bitfield: cbor bignum was too large")
+		return fmt.Errorf("t.Bitfield: cbor bitfield was too large")
+	}
+
+	if extra == 0 {
+		return fmt.Errorf("t.Bitfield: cbor bitfield too small")
 	}
 
 	if extra > 0 {
@@ -100,9 +103,7 @@ func (t *Node) UnmarshalCBOR(r io.Reader) error {
 		if _, err := io.ReadFull(br, buf); err != nil {
 			return err
 		}
-		t.Bitfield = big.NewInt(0).SetBytes(buf)
-	} else {
-		t.Bitfield = big.NewInt(0)
+		t.Bitfield = NewBitmapFrom(buf)
 	}
 	// t.Pointers ([]*hamt.Pointer) (slice)
 
