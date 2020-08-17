@@ -29,3 +29,13 @@ func indexForBitPos(bp int, bitfield *big.Int) int {
 	}
 	return count + bits.OnesCount(uint(w[i])&((1<<x)-1))
 }
+
+// How many elements does the bitfield say we should have? Count the ones.
+func (n *Node) bitsSetCount() int {
+	w := n.Bitfield.Bits()
+	count := 0
+	for _, b := range w {
+		count += bits.OnesCount(uint(b))
+	}
+	return count
+}

@@ -82,6 +82,7 @@ func TestCanonicalStructureAlternateBitWidth(t *testing.T) {
 	addAndRemoveKeys(t, []string{"K"}, []string{"B"}, UseTreeBitWidth(5), UseHashFunction(identityHash))
 	addAndRemoveKeys(t, []string{"K0", "K1", "KAA1", "KAA2", "KAA3"}, []string{"KAA4"}, UseTreeBitWidth(5), UseHashFunction(identityHash))
 }
+
 func TestOverflow(t *testing.T) {
 	keys := make([]string, 4)
 	for i := range keys {
@@ -847,5 +848,318 @@ func TestSetNilValues(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+// Some tests that use manually constructed (and very basic) CBOR forms of
+// nodes to test whether the implementation will reject malformed encoded nodes
+// on load.
+func TestMalformedHamt(t *testing.T) {
+	ctx := context.Background()
+	blocks := newMockBlocks()
+	cs := cbor.NewCborStore(blocks)
+	bcid, err := cid.Decode("bafy2bzaceab7vkg5c3zti7ebqensb3onksjkc4wwktkiledkezgvnbvzs4cti")
+	bccid, err := cid.Decode("bafy2bzaceab7vkg5c3zti7ebqensb3onksjkc4wwktkiledkezgvnbvzs4cqa")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// just the bcid bytes, without the tag
+	cidBytes, _ := hex.DecodeString("000171A0E4022003FAA8DD16F3347C81811B20EDCD5492A172D654D485906A264D5686B9970534")
+	// just the bccid bytes, without the tag, prefixed with 0x00 for dag-cbor
+	ccidBytes, _ := hex.DecodeString("000171a0e4022003faa8dd16f3347c81811b20edcd5492a172d654d485906a264d5686b9970500")
+	// badCidBytes is cidBytes but with dag-pb, prefixed with 0x00 for dag-cbor
+	badCidBytes, _ := hex.DecodeString("000170a0e4022003faa8dd16f3347c81811b20edcd5492a172d654d485906a264d5686b9970534")
+
+	// util closures
+	store := func(blob []byte) {
+		blocks.data[bcid] = block.NewBlock(blob)
+	}
+	load := func() *Node {
+		n, err := LoadNode(ctx, cs, bcid, UseTreeBitWidth(8), UseHashFunction(identityHash))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	find := func(key []byte, expected []byte) *[]byte {
+		vg, err := load().FindRaw(ctx, string(key))
+		if err != nil {
+			t.Fatal(err)
+		}
+		// should find a bytes(1) "\xff"
+		if !bytes.Equal(vg, expected) {
+			return &vg
+		}
+		return nil
+	}
+
+	type kv struct {
+		key   byte
+		value byte
+	}
+	bucketCbor := func(kvs ...kv) []byte {
+		en := []byte{}
+		for _, kv := range kvs {
+			en = bcat(en, bcat(b(0x80+2), // array(2)
+				bcat(b(0x40+1), b(kv.key)),    // bytes(1) "\x??"
+				bcat(b(0x40+1), b(kv.value)))) // bytes(1) "\x??"
+		}
+		return bcat(b(0xa0+1), // map(1)
+			bcat(b(0x60+1), b(0x31)), // string(1) "1"
+			bcat(b(0x80+byte(len(kvs))), // array(?)
+				en)) // bucket contents
+	}
+
+	// most minimal HAMT node with one k/v entry, sanity check we can load this
+	store(
+		bcat(b(0x80+2), // array(2)
+			bcat(b(0x40+1), b(0x01)), // bytes(1) "\x01" (bitmap)
+			bcat(b(0x80+1), // array(1)
+				bucketCbor(kv{0x00, 0xff})))) // 0x00=0xff
+	// should find a bytes(1) "\xff"
+	find(b(0x00), bcat(b(0x40+1), b(0xff)))
+	// print the raw cbor: fmt.Printf("%v\n", hex.EncodeToString(blocks.data[bcid].RawData()))
+
+	// 10 entry node, assumed bitwidth of >3
+	store(
+		bcat(b(0x80+2), // array(2)
+			bcat(b(0x40+2), []byte{0x03, 0xff}), // bytes(1) "\x3ff" (bitmap with lower 10 bits set)
+			bcat(b(0x80+10), // array(10)
+				bucketCbor(kv{0x00, 0xf0}),   // 0x00=0xf0
+				bucketCbor(kv{0x01, 0xf1}),   // 0x01=0xf1
+				bucketCbor(kv{0x02, 0xf2}),   // 0x02=0xf2
+				bucketCbor(kv{0x03, 0xf3}),   // 0x03=0xf3
+				bucketCbor(kv{0x04, 0xf4}),   // 0x04=0xf4
+				bucketCbor(kv{0x05, 0xf5}),   // 0x05=0xf5
+				bucketCbor(kv{0x06, 0xf6}),   // 0x06=0xf6
+				bucketCbor(kv{0x07, 0xf7}),   // 0x07=0xf7
+				bucketCbor(kv{0x08, 0xf8}),   // 0x08=0xf8
+				bucketCbor(kv{0x09, 0xf9})))) // 0x09=0xf9
+	// sanity check
+	for i := 0; i < 10; i++ {
+		v := bcat(b(0x40+1), b(0xf0+byte(i)))
+		if vg := find(b(0x00+byte(i)), v); vg != nil {
+			t.Fatalf("expected a value of %v, got %v", hex.EncodeToString(v), hex.EncodeToString(*vg))
+		}
+	}
+
+	// load as bitWidth=3, which can only handle a max of 8 elements
+	n, err := LoadNode(ctx, cs, bcid, UseTreeBitWidth(3), UseHashFunction(identityHash))
+	if err != ErrMalformedHamt || n != nil {
+		t.Fatal("Should have returned ErrMalformedHamt for too-small bitWidth")
+	}
+
+	// test that the bitfield set count matches array size
+	// this node says it has 3 elements in the bitfield, but there are 4 buckets
+	store(
+		bcat(b(0x80+2), // array(2)
+			bcat(b(0x40+1), b(0x03)), // bytes(1) "\x03" (bitmap)
+			bcat(b(0x80+1), // array(1)
+				bucketCbor(kv{0x00, 0xff}),   // 0x00=0xff
+				bucketCbor(kv{0x00, 0xff}),   // 0x00=0xff
+				bucketCbor(kv{0x00, 0xff}),   // 0x00=0xff
+				bucketCbor(kv{0x00, 0xff})))) // 0x00=0xff
+	n, err = LoadNode(ctx, cs, bcid, UseTreeBitWidth(3), UseHashFunction(identityHash))
+	if err != ErrMalformedHamt || n != nil {
+		t.Fatal("Should have returned ErrMalformedHamt for mismatch bitfield count")
+	}
+
+	// test mixed link & bucket
+
+	// this node contains 2 elements, the first is a plain entry with one bucket
+	// and with a single key of 0x0100, the second element is a link to a child
+	// node which happens to be the same CID as this node will be stored in.
+	// However, this second entry has both a CID and a bucket in the same
+	// element, which is not allowed. Without checks for exactly one of these
+	// two things then then a lookup for key 0x0100 would navigate through this
+	// node and back again as its own child to the first element.
+	store(
+		bcat(b(0x80+2), // array(2)
+			bcat(b(0x40+1), b(0x03)), // bytes(1) "\x03" (bitmap)
+			bcat(b(0x80+2), // array(2)
+				bcat(b(0xa0+1), // map(1)
+					bcat(b(0x60+1), b(0x31)), // string(1) "1"
+					bcat(b(0x80+1), // array(1)
+						bcat(b(0x80+2), // array(2)
+							bcat(b(0x40+2), []byte{0x01, 0x00}), // bytes(2) "\x0100"
+							bcat(b(0x40+1), b(0xff))))),         // bytes(1) "\xff"
+				bcat(b(0xa0+2), // map(2)
+					bcat(b(0x60+1), b(0x30)), // string(1) "0"
+					bcat(b(0xd8), b(0x2a), // tag(42)
+						b(0x58), b(0x27), // bytes(39)
+						cidBytes), // cid
+					bcat(b(0x60+1), b(0x31)), // string(1) "1"
+					bcat(b(0x80+1), // array(1)
+						bcat(b(0x80+2), // array(2)
+							bcat(b(0x40+1), b(0x01)),      // bytes(1) "\x00"
+							bcat(b(0x40+1), b(0xfe)))))))) // bytes(1) "\xff
+
+	n, err = LoadNode(ctx, cs, bcid, UseTreeBitWidth(8), UseHashFunction(identityHash))
+	if err == nil || n != nil || err.Error() != "Pointers should be a single element map" {
+		// no ErrMalformedHamt here possible bcause of cbor-gen wrapping
+		t.Fatal("Should have returned error for bad Pointer cbor")
+	}
+
+	// test pointers with links have are DAG-CBOR multicodec
+	// sanity check minimal node pointing to a child node
+	store(
+		bcat(b(0x80+2), // array(2)
+			bcat(b(0x40+1), b(0x01)), // bytes(1) "\x01" (bitmap)
+			bcat(b(0x80+1), // array(1)
+				bcat(b(0xa0+1), // map(1)
+					bcat(b(0x60+1), b(0x30)), // string(1) "0"
+					bcat(b(0xd8), b(0x2a), // tag(42)
+						b(0x58), b(0x27), // bytes(39)
+						cidBytes))))) // cid
+	load()
+
+	// node pointing to a non-dag-cbor node
+	store(
+		bcat(b(0x80+2), // array(2)
+			bcat(b(0x40+1), b(0x01)), // bytes(1) "\x01" (bitmap)
+			bcat(b(0x80+1), // array(1)
+				bcat(b(0xa0+1), // map(1)
+					bcat(b(0x60+1), b(0x30)), // string(1) "0"
+					bcat(b(0xd8), b(0x2a), // tag(42)
+						b(0x58), b(0x27), // bytes(39)
+						badCidBytes))))) // cid
+	n, err = LoadNode(ctx, cs, bcid, UseTreeBitWidth(8), UseHashFunction(identityHash))
+	if err != ErrMalformedHamt || n != nil {
+		t.Fatal("Should have returned ErrMalformedHamt for bad child link codec")
+	}
+
+	// bucket with zero elements
+	store(
+		bcat(b(0x80+2), // array(2)
+			bcat(b(0x40+1), b(0x01)), // bytes(1) "\x01" (bitmap)
+			bcat(b(0x80+1), // array(1)
+				bucketCbor()))) // empty bucket
+	n, err = LoadNode(ctx, cs, bcid, UseTreeBitWidth(8), UseHashFunction(identityHash))
+	if err != ErrMalformedHamt || n != nil {
+		t.Fatal("Should have returned ErrMalformedHamt for zero element bucket")
+	}
+
+	// bucket with 4 elements
+	store(
+		bcat(b(0x80+2), // array(2)
+			bcat(b(0x40+1), b(0x01)), // bytes(1) "\x01" (bitmap)
+			bcat(b(0x80+1), // array(1)
+				bucketCbor(
+					kv{0x00, 0xff},
+					kv{0x01, 0xff},
+					kv{0x02, 0xff},
+					kv{0x03, 0xff})))) // bucket with 4 entires
+
+	n, err = LoadNode(ctx, cs, bcid, UseTreeBitWidth(8), UseHashFunction(identityHash))
+	if err != ErrMalformedHamt || n != nil {
+		t.Fatal("Should have returned ErrMalformedHamt for four element bucket")
+	}
+
+	// test KV buckets are ordered by key (bytewise comparison)
+
+	store(
+		bcat(b(0x80+2), // array(2)
+			bcat(b(0x40+1), b(0x01)), // bytes(1) "\x01" (bitmap)
+			bcat(b(0x80+1), // array(1)
+				bucketCbor(
+					kv{0x01, 0xff},
+					kv{0x00, 0xff})))) // bucket with 2, misordered entries
+
+	n, err = LoadNode(ctx, cs, bcid, UseTreeBitWidth(8), UseHashFunction(identityHash))
+	if err != ErrMalformedHamt || n != nil {
+		t.Fatal("Should have returned ErrMalformedHamt for mis-ordered bucket")
+	}
+
+	// test duplicate keys
+	store(
+		bcat(b(0x80+2), // array(2)
+			bcat(b(0x40+1), b(0x01)), // bytes(1) "\x01" (bitmap)
+			bcat(b(0x80+1), // array(1)
+				bucketCbor(
+					kv{0x00, 0x01},
+					kv{0x01, 0xf0},
+					kv{0x01, 0xff})))) // bucket with 3 element, 2 dupes with different values
+
+	n, err = LoadNode(ctx, cs, bcid, UseTreeBitWidth(8), UseHashFunction(identityHash))
+	if err != ErrMalformedHamt || n != nil {
+		t.Fatal("Should have returned ErrMalformedHamt for mis-ordered bucket")
+	}
+
+	// _the_ empty HAMT, should be possible, but special-case format for a roor node
+	store(
+		bcat(b(0x80+2), // array(2)
+			bcat(b(0x40+1), b(0x00)), // bytes(1) "\x00" (bitmap)
+			bcat(b(0x80+0))))         // array(0)
+	load()
+
+	// make a child empty block and point to it in a root
+	blocks.data[bccid] = block.NewBlock(
+		bcat(b(0x80+2), // array(2)
+			bcat(b(0x40+1), b(0x00)), // bytes(1) "\x00" (bitmap)
+			bcat(b(0x80+0))))         // array(0)
+	// root block pointing to the child, child block can't be empty
+	store(
+		bcat(b(0x80+2), // array(2)
+			bcat(b(0x40+1), b(0x01)), // bytes(1) "\x01" (bitmap)
+			bcat(b(0x80+1), // array(1)
+				bcat(b(0xa0+1), // map(1)
+					bcat(b(0x60+1), b(0x30)), // string(1) "0"
+					bcat(b(0xd8), b(0x2a), // tag(42)
+						b(0x58), b(0x27), // bytes(39)
+						ccidBytes))))) // cid
+
+	vg, err := load().FindRaw(ctx, string([]byte{0x00, 0x01}))
+	// without validation of the child block, this would return an ErrNotFound
+	if err != ErrMalformedHamt || vg != nil {
+		t.Fatal("Should have returned ErrMalformedHamt for its empty child node")
+	}
+
+	// validate child block not allowed to have bucketSize or less lone-elements
+	blocks.data[bccid] = block.NewBlock(
+		bcat(b(0x80+2), // array(2)
+			bcat(b(0x40+1), b(0x01)), // bytes(1) "\x01" (bitmap)
+			bcat(b(0x80+1), // array(1)
+				bucketCbor(kv{0x00, 0x01}))))
+	vg, err = load().FindRaw(ctx, string([]byte{0x00, 0x01}))
+	// without validation of the child block, this would return an ErrNotFound
+	if err != ErrMalformedHamt || vg != nil {
+		t.Fatal("Should have returned ErrMalformedHamt for its too-small child node")
+	}
+
+	blocks.data[bccid] = block.NewBlock(
+		bcat(b(0x80+2), // array(2)
+			bcat(b(0x40+1), b(0x01)), // bytes(1) "\x01" (bitmap)
+			bcat(b(0x80+3), // array(1)
+				bucketCbor(kv{0x00, 0x01}),
+				bucketCbor(kv{0x01, 0x01}),
+				bucketCbor(kv{0x02, 0x01}))))
+	vg, err = load().FindRaw(ctx, string([]byte{0x00, 0x01}))
+	// without validation of the child block, this would return an ErrNotFound
+	if err != ErrMalformedHamt || vg != nil {
+		t.Fatal("Should have returned ErrMalformedHamt for its too-small child node")
+	}
+
+	// same as the above case, too few direct entries, but this one has a link in
+	// it to a child so we can't perform this check, so this should work
+	blocks.data[bccid] = block.NewBlock(
+		bcat(b(0x80+2), // array(2)
+			bcat(b(0x40+1), b(0x03)), // bytes(1) "\x03" (bitmap)
+			bcat(b(0x80+2), // array(2)
+				bcat(b(0xa0+1), // map(1)
+					bcat(b(0x60+1), b(0x31)), // string(1) "1"
+					bcat(b(0x80+1), // array(1)
+						bcat(b(0x80+2), // array(2)
+							bcat(b(0x40+2), []byte{0x00, 0x01}), // bytes(2) "\x0001"
+							bcat(b(0x40+1), b(0xff))))),         // bytes(1) "\xff"
+				bcat(b(0xa0+1), // map(1)
+					bcat(b(0x60+1), b(0x30)), // string(1) "0"
+					bcat(b(0xd8), b(0x2a), // tag(42)
+						b(0x58), b(0x27), // bytes(39)
+						ccidBytes))))) // cid
+
+	vg, err = load().FindRaw(ctx, string([]byte{0x00, 0x01}))
+	// without validation of the child block, this would return an ErrNotFound
+	if err != nil && bytes.Compare(vg, []byte{0x40 + 2, 0x00, 0x01}) != 0 {
+		t.Fatal("Should have returned found entry")
 	}
 }
