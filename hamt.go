@@ -448,54 +448,75 @@ func (n *Node) SetRaw(ctx context.Context, k string, raw []byte) error {
 	return n.modifyValue(ctx, &hashBits{b: n.hash(kb)}, kb, d)
 }
 
-// When deleting elements, we need to perform a compaction such that there is
-// a single canonical form of any HAMT with a given set of key/value pairs.
-// Any node with less than `bucketSize` elements needs to be collapsed into a
-// bucket of Pointers in the parent node.
-// TODO(rvagg): I don't think the logic here is correct. A compaction should
-// occur strictly when: there are no links to child nodes remaining (assuming
-// we've cleaned them first and they haven't caused a cascading collapse to
-// here) and the number of direct elements (actual k/v pairs) in this node is
-// equal o bucketSize+1. Anything less than bucketSize+1 is invalid for a node
-// other than the root node (which probably won't have cleanChild() called on
-// it). e.g.
-// https://github.com/rvagg/iamap/blob/fad95295b013c8b4f0faac6dd5d9be175f6e606c/iamap.js#L333
-// If we perform this depth-first, then it's possible to see the collapse
-// cascade upward such that we end up with some parent node with a bucket with
-// only bucketSize elements. The canonical form of the HAMT requires that
-// any node that could be collapsed into a parent bucket is collapsed and.
+// the number of links to child nodes this node contains
+func (n *Node) directChildCount() int {
+	count := 0
+	for _, p := range n.Pointers {
+		if p.isShard() {
+			count++
+		}
+	}
+	return count
+}
+
+// the number of KV entries this node contains
+func (n *Node) directKVCount() int {
+	count := 0
+	for _, p := range n.Pointers {
+		if !p.isShard() {
+			count = count + len(p.KVs)
+		}
+	}
+	return count
+}
+
+// This happens after deletes to ensure that we retain canonical form for the
+// given set of data this HAMT contains. This is a key part of the CHAMP
+// algorithm. Any node that could be represented as a bucket in a parent node
+// should be collapsed as such. This collapsing process could continue back up
+// the tree as far as necessary to represent the data in the minimal HAMT form.
+// This operation is done from a parent perspective, so we clean the child
+// below us first and then our parent cleans us.
 func (n *Node) cleanChild(chnd *Node, cindex byte) error {
-	l := len(chnd.Pointers)
-	switch {
-	case l == 0:
-		return fmt.Errorf("incorrectly formed HAMT")
-	case l == 1:
-		// TODO: only do this if its a value, cant do this for shards unless pairs requirements are met.
-
-		ps := chnd.Pointers[0]
-		if ps.isShard() {
-			return nil
-		}
-
-		return n.setPointer(cindex, ps)
-	case l <= bucketSize:
-		var chvals []*KV
-		for _, p := range chnd.Pointers {
-			if p.isShard() {
-				return nil
-			}
-
-			for _, sp := range p.KVs {
-				if len(chvals) == bucketSize {
-					return nil
-				}
-				chvals = append(chvals, sp)
-			}
-		}
-		return n.setPointer(cindex, &Pointer{KVs: chvals})
-	default:
+	if chnd.directChildCount() != 0 {
+		// child has its own children, nothing to collapse
 		return nil
 	}
+
+	if chnd.directKVCount() > bucketSize {
+		// child contains more local elements than could be collapsed
+		return nil
+	}
+
+	l := len(chnd.Pointers)
+	if l == 0 {
+		return fmt.Errorf("incorrectly formed HAMT")
+	}
+
+	if l == 1 {
+		// The case where the child node has a single bucket, which we know can
+		// only contain `bucketSize` elements (maximum), so we need to pull that
+		// bucket up into this node.
+		// This case should only happen when it bubbles up from the case below
+		// where a lower child has its elements compacted into a single bucket. We
+		// shouldn't be able to reach this block unless a delete has been
+		// performed on a lower block and we are performing a post-delete clean on
+		// a parent block.
+		return n.setPointer(cindex, chnd.Pointers[0])
+	}
+
+	// The case where the child node contains enough elements to fit in a
+	// single bucket and therefore can't justify its existence as a node on its
+	// own. So we collapse all entries into a single bucket and replace the
+	// link to the child with that bucket.
+	// This may cause cascading collapses if this is the only bucket in the
+	// current node, that case will be handled by our parent node by the l==1
+	// case above.
+	var chvals []*KV
+	for _, p := range chnd.Pointers {
+		chvals = append(chvals, p.KVs...)
+	}
+	return n.setPointer(cindex, &Pointer{KVs: chvals})
 }
 
 // Add a new value, update an existing value, or delete a value from the HAMT,
