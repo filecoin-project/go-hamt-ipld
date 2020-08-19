@@ -1,10 +1,8 @@
 go-hamt-ipld
 ==================
 
-[![](https://img.shields.io/badge/made%20by-Protocol%20Labs-blue.svg?style=flat-square)](http://ipn.io)
-[![](https://img.shields.io/badge/project-IPFS-blue.svg?style=flat-square)](http://libp2p.io/)
-[![](https://img.shields.io/badge/freenode-%23ipfs-blue.svg?style=flat-square)](http://webchat.freenode.net/?channels=%23ipfs)
-[![Travis CI](https://travis-ci.org/ipfs/go-hamt-ipld.svg?branch=master)](https://travis-ci.org/ipfs/go-hamt-ipld)
+[![](https://img.shields.io/badge/made%20by-Protocol%20Labs-blue.svg?style=flat-square)](https://protocol.ai/)
+[![Travis CI](https://travis-ci.org/filecoin-project/go-hamt-ipld.svg?branch=master)](https://travis-ci.org/filecoin-project/go-hamt-ipld)
 
 **This package is a reference implementation of the IPLD HAMT used in the
 Filecoin blockchain.** It includes some optional flexibility such that it may
@@ -20,7 +18,7 @@ set of keys and their values, a HAMT using the same parameters and CHAMP
 semantics, the root node should always produce the same content identifier
 (CID).
 
-**See https://godoc.org/github.com/ipfs/go-hamt-ipld for more information and
+**See https://godoc.org/github.com/filecoin-project/go-hamt-ipld for more information and
 API details.**
 
 ## License
