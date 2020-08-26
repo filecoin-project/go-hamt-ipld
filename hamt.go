@@ -405,10 +405,16 @@ func loadNode(
 	return &out, nil
 }
 
-// Calculate the total _byte weight_ of the HAMT by fetching each node
-// from the IpldStore and adding its raw byte size to the total. This
-// operation will exhaustively load every node of the HAMT so should not
-// be used lightly.
+// checkSize computes the total serialized size of the entire HAMT.
+// It both puts and loads blocks as necesary to do this
+// (using the Put operation and a paired Get to discover the serial size,
+// and the load to move recursively as necessary).
+//
+// This is an expensive operation and should only be used in testing and analysis.
+//
+// Note that checkSize *does* actually *use the blockstore*: therefore it
+// will affect get and put counts (and makes no attempt to avoid duplicate puts!);
+// be aware of this if you are measuring those event counts.
 func (n *Node) checkSize(ctx context.Context) (uint64, error) {
 	c, err := n.store.Put(ctx, n)
 	if err != nil {
