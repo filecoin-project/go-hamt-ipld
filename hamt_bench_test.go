@@ -53,6 +53,7 @@ func BenchmarkSerializeNode(b *testing.B) {
 type benchSetCase struct {
 	kcount   int
 	bitwidth int
+	// flushInterval int
 }
 
 var benchSetCaseTable []benchSetCase
@@ -76,6 +77,9 @@ func init() {
 		7,
 		8,
 	}
+	// flushIntervals := []int{
+	// 	1,
+	// }
 	// bucketsize-aka-arraywidth?  maybe someday.
 	for _, c := range kCounts {
 		for _, bw := range bitwidths {
@@ -150,9 +154,9 @@ func BenchmarkFill(b *testing.B) {
 //
 // The number of *additional* blocks per entry is reported.
 // This number is usually less than one, because the bulk flush means changes might be amortized.
-func BenchmarkSetBulk(b *testing.B) {
-	doBenchmarkSetSuite(b, false)
-}
+// func BenchmarkSetBulk(b *testing.B) {
+// 	doBenchmarkSetSuite(b, false)
+// }
 
 // BenchmarkSetIndividual is the same as BenchmarkSetBulk, but flushes more.
 // Flush happens per insert.
@@ -166,8 +170,9 @@ func BenchmarkSetIndividual(b *testing.B) {
 }
 
 func doBenchmarkSetSuite(b *testing.B, flushPer bool) {
-	for _, t := range benchSetCaseTable {
+	for j, t := range benchSetCaseTable {
 		b.Run(fmt.Sprintf("n=%dk/bitwidth=%d", t.kcount, t.bitwidth), func(b *testing.B) {
+			fmt.Printf("Case: %d, b.N=%d\n", j, b.N)
 			for i := 0; i < b.N; i++ {
 				r := rander{rand.New(rand.NewSource(int64(i)))}
 				blockstore := newMockBlocks()
