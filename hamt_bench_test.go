@@ -51,12 +51,28 @@ func BenchmarkSerializeNode(b *testing.B) {
 }
 
 type benchSetCase struct {
+	kcount        int
+	bitwidth      int
+	datasize      int
+	flushInterval int
+}
+
+type benchFillCase struct {
+	kcount        int
+	bitwidth      int
+	datasize      int
+	flushInterval int
+}
+
+type benchFindCase struct {
 	kcount   int
 	bitwidth int
-	// flushInterval int
+	datasize int
 }
 
 var benchSetCaseTable []benchSetCase
+var benchFillCaseTable []benchFillCase
+var benchFindCaseTable []benchFindCase
 
 func init() {
 	kCounts := []int{
@@ -77,13 +93,40 @@ func init() {
 		7,
 		8,
 	}
-	// flushIntervals := []int{
-	// 	1,
-	// }
+	flushIntervals := []int{
+		1,
+		1000,
+	}
+	dataSize := []int{
+		1,
+	}
 	// bucketsize-aka-arraywidth?  maybe someday.
 	for _, c := range kCounts {
-		for _, bw := range bitwidths {
-			benchSetCaseTable = append(benchSetCaseTable, benchSetCase{kcount: c, bitwidth: bw})
+		for _, d := range dataSize {
+			for _, bw := range bitwidths {
+				benchFindCaseTable = append(benchFindCaseTable,
+					benchFindCase{
+						kcount:   c,
+						bitwidth: bw,
+						datasize: d,
+					})
+				for _, f := range flushIntervals {
+					benchFillCaseTable = append(benchFillCaseTable,
+						benchFillCase{
+							kcount:        c,
+							bitwidth:      bw,
+							datasize:      d,
+							flushInterval: f,
+						})
+					benchSetCaseTable = append(benchSetCaseTable,
+						benchSetCase{
+							kcount:        c,
+							bitwidth:      bw,
+							datasize:      d,
+							flushInterval: f,
+						})
+				}
+			}
 		}
 	}
 }
@@ -114,7 +157,7 @@ func init() {
 // See "BenchmarkSet*" for a probe of how long it takes to set additional entries in an already-large hamt
 // (this gives a more interesting and useful nanoseconds-per-op indicators).
 func BenchmarkFill(b *testing.B) {
-	for _, t := range benchSetCaseTable {
+	for _, t := range benchFillCaseTable {
 		b.Run(fmt.Sprintf("n=%dk/bitwidth=%d", t.kcount, t.bitwidth), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				r := rander{rand.New(rand.NewSource(int64(i)))}
@@ -148,32 +191,24 @@ func BenchmarkFill(b *testing.B) {
 	}
 }
 
-// BenchmarkSetBulk creates a large HAMT, then resets the timer, and does another 1000 inserts,
+// BenchmarkSet creates a large HAMT, then starts the timer, and does another 1000 inserts,
 // measuring the time taken for this second batch of inserts.
-// Flushing happens once after all 1000 inserts.
+// Flushing rate is parameterized.
 //
 // The number of *additional* blocks per entry is reported.
-// This number is usually less than one, because the bulk flush means changes might be amortized.
-// func BenchmarkSetBulk(b *testing.B) {
-// 	doBenchmarkSetSuite(b, false)
-// }
-
-// BenchmarkSetIndividual is the same as BenchmarkSetBulk, but flushes more.
-// Flush happens per insert.
-//
-// The number of *additional* blocks per entry is reported.
-// Since we flush each insert individually, this number should be at least 1 --
+// This number is usually less than one with high flush interval means changes might be amortized.
+// For flush interval one this number should be at least 1 --
 // however, since we choose random keys, it can still turn out lower if keys happen to collide.
 // (The Set method does not make it possible to adjust our denominator to compensate for this: it does not yield previous values nor indicators of prior presense.)
-func BenchmarkSetIndividual(b *testing.B) {
-	doBenchmarkSetSuite(b, true)
+func BenchmarkSet(b *testing.B) {
+	doBenchmarkSetSuite(b)
 }
 
-func doBenchmarkSetSuite(b *testing.B, flushPer bool) {
+func doBenchmarkSetSuite(b *testing.B) {
 	for j, t := range benchSetCaseTable {
 		b.Run(fmt.Sprintf("n=%dk/bitwidth=%d", t.kcount, t.bitwidth), func(b *testing.B) {
-			fmt.Printf("Case: %d, b.N=%d\n", j, b.N)
 			for i := 0; i < b.N; i++ {
+				b.StopTimer()
 				r := rander{rand.New(rand.NewSource(int64(i)))}
 				blockstore := newMockBlocks()
 				n := NewNode(cbor.NewCborStore(blockstore), UseTreeBitWidth(t.bitwidth))
@@ -187,10 +222,11 @@ func doBenchmarkSetSuite(b *testing.B, flushPer bool) {
 					b.Fatal(err)
 				}
 				initalBlockstoreSize := len(blockstore.data)
-				b.ResetTimer()
+				//	b.ResetTimer()
 				blockstore.stats = blockstoreStats{}
 				// Additional inserts:
 				b.ReportAllocs()
+				b.StartTimer()
 				for j := 0; j < 1000; j++ {
 					if err := n.Set(context.Background(), r.randString(), r.randValue()); err != nil {
 						b.Fatal(err)
