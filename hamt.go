@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"sort"
 
 	cid "github.com/ipfs/go-cid"
 	cbor "github.com/ipfs/go-ipld-cbor"
@@ -564,6 +565,13 @@ func (n *Node) cleanChild(chnd *Node, cindex byte) error {
 	for _, p := range chnd.Pointers {
 		chvals = append(chvals, p.KVs...)
 	}
+	kvLess := func(i, j int) bool {
+		ki := chvals[i].Key
+		kj := chvals[j].Key
+		return bytes.Compare(ki, kj) < 0
+	}
+	sort.Slice(chvals, kvLess)
+
 	return n.setPointer(cindex, &Pointer{KVs: chvals})
 }
 

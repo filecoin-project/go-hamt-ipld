@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"math/rand"
@@ -15,6 +16,8 @@ import (
 	block "github.com/ipfs/go-block-format"
 	cid "github.com/ipfs/go-cid"
 	cbor "github.com/ipfs/go-ipld-cbor"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	cbg "github.com/whyrusleeping/cbor-gen"
 )
 
@@ -1235,4 +1238,73 @@ func TestMalformedHamt(t *testing.T) {
 	if err != nil && bytes.Compare(vg, []byte{0x40 + 2, 0x00, 0x01}) != 0 {
 		t.Fatal("Should have returned found entry")
 	}
+}
+
+func TestCleanChildOrdering(t *testing.T) {
+	// This test originates from a case hit while testing filecoin-project/specs-actors.
+	// TODO a HAMT exercising this case can very likely be constructed with many fewer
+	// operations. I'm duplicating the full original test for expedience
+	//
+	// The important part of this HAMT is that at some point child with index 20 looks like:
+	// P0 -- []KV{KV{Key: 0x01a0, Value: v0}}
+	// P1 -- []KV{KV{Key: 0x01a8, Value: v1}}
+	// P2 -- []KV{KV{Key: 0x0181, Value: v2}}
+	// P3 -- []KV{KV{Key: 0x006c, Value: v2}}
+	//
+	// We then delete 0x006c.  This forces this child node into a bucket.
+	// before writing this test cleanChild did not explicitly sort KVs from
+	// all pointers, so the new bucket looked like:
+	// []KV{
+	//   KV{Key: 0x01a0, Value: v1},
+	//   KV{Key: 0x01a8, Value: v2},
+	//   KV{Key: 0x0181, Value: v2},
+	// }
+	//
+	// This violated the buckets-are-sorted-by-key condition
+
+	// Construct HAMT
+	makeKey := func(i uint64) string {
+		buf := make([]byte, 10)
+		n := binary.PutUvarint(buf, i)
+		return string(buf[:n])
+	}
+	dummyValue := []byte{0xaa, 0xbb, 0xcc, 0xdd}
+
+	ctx := context.Background()
+	cs := cbor.NewCborStore(newMockBlocks())
+	hamtOptions := []Option{
+		UseTreeBitWidth(5),
+		UseHashFunction(func(input []byte) []byte {
+			res := sha256.Sum256(input)
+			return res[:]
+		}),
+	}
+
+	h := NewNode(cs, hamtOptions...)
+
+	for i := uint64(100); i < uint64(195); i++ {
+		err := h.Set(ctx, makeKey(i), dummyValue)
+		require.NoError(t, err)
+	}
+
+	// Shouldn't matter but repeating original case exactly
+	require.NoError(t, h.Flush(ctx))
+	root, err := cs.Put(ctx, h)
+	require.NoError(t, err)
+	h, err = LoadNode(ctx, cs, root, hamtOptions...)
+	require.NoError(t, err)
+
+	// Delete key 104 so child indexed at 20 has four pointers
+	err = h.Delete(ctx, makeKey(104))
+	assert.NoError(t, err)
+	err = h.Delete(ctx, makeKey(108))
+	assert.NoError(t, err)
+	err = h.Flush(ctx)
+	assert.NoError(t, err)
+	root, err = cs.Put(ctx, h)
+
+	// Reload without error
+	require.NoError(t, err)
+	h, err = LoadNode(ctx, cs, root, hamtOptions...)
+	assert.NoError(t, err)
 }
