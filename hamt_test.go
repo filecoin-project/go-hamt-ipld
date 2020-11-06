@@ -41,6 +41,7 @@ func (mb *mockBlocks) Get(c cid.Cid) (block.Block, error) {
 
 func (mb *mockBlocks) Put(b block.Block) error {
 	mb.stats.evtcntPut++
+	mb.stats.bytesPut += len(b.RawData())
 	if _, exists := mb.data[b.Cid()]; exists {
 		mb.stats.evtcntPutDup++
 	}
@@ -51,6 +52,7 @@ func (mb *mockBlocks) Put(b block.Block) error {
 type blockstoreStats struct {
 	evtcntGet    int
 	evtcntPut    int
+	bytesPut     int
 	evtcntPutDup int
 }
 

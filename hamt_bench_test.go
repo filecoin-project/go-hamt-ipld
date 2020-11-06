@@ -15,14 +15,14 @@ type rander struct {
 	r *rand.Rand
 }
 
-func (r *rander) randString() string {
-	buf := make([]byte, 18)
+func (r *rander) randString(stringSize int) string {
+	buf := make([]byte, stringSize)
 	rand.Read(buf)
 	return hex.EncodeToString(buf)
 }
 
-func (r *rander) randValue() []byte {
-	buf := make([]byte, 30)
+func (r *rander) randValue(datasize int) []byte {
+	buf := make([]byte, datasize)
 	rand.Read(buf)
 	return buf
 }
@@ -34,7 +34,7 @@ func BenchmarkSerializeNode(b *testing.B) {
 	n := NewNode(cs)
 
 	for i := 0; i < 50; i++ {
-		if err := n.Set(context.TODO(), r.randString(), r.randValue()); err != nil {
+		if err := n.Set(context.TODO(), r.randString(18), r.randValue(30)); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -50,42 +50,28 @@ func BenchmarkSerializeNode(b *testing.B) {
 	}
 }
 
-type benchSetCase struct {
-	kcount        int
-	bitwidth      int
-	datasize      int
-	flushInterval int
+type hamtParams struct {
+	id       string
+	count    int
+	datasize int
+	keysize  int
 }
 
-type benchFillCase struct {
-	kcount        int
-	bitwidth      int
-	datasize      int
-	flushInterval int
-}
-
-type benchFindCase struct {
-	kcount   int
+type benchCase struct {
+	id       string
+	count    int
 	bitwidth int
 	datasize int
+	keysize  int
 }
 
-var benchSetCaseTable []benchSetCase
-var benchFillCaseTable []benchFillCase
-var benchFindCaseTable []benchFindCase
+var caseTable []benchCase
 
 func init() {
-	kCounts := []int{
-		1,
-		5,
-		10,
-		50,
-		100,
-		500,
-		1000, // aka 1M
-		//10000, // aka 10M -- you'll need a lot of RAM for this.  Also, some patience.
-	}
+
 	bitwidths := []int{
+		1,
+		2,
 		3,
 		4,
 		5,
@@ -93,40 +79,63 @@ func init() {
 		7,
 		8,
 	}
-	flushIntervals := []int{
-		1,
-		1000,
+
+	hamts := []hamtParams{
+		hamtParams{
+			id:       "init.AddressMap",
+			count:    55649,
+			datasize: 3,
+			keysize:  26,
+		},
+		hamtParams{
+			id:       "market.PendingProposals",
+			count:    40713,
+			datasize: 151,
+			keysize:  38,
+		},
+		hamtParams{
+			id:       "market.EscrowWTable",
+			count:    2113,
+			datasize: 7,
+			keysize:  4,
+		},
+		hamtParams{
+			id:       "market.LockedTable",
+			count:    2098,
+			datasize: 4,
+			keysize:  4,
+		},
+		hamtParams{
+			id:       "market.DealOpsByEpoch",
+			count:    16558,
+			datasize: 43,
+			keysize:  3,
+		},
+		hamtParams{
+			id:       "power.CronEventQueue",
+			count:    60,
+			datasize: 43,
+			keysize:  3,
+		},
+		hamtParams{
+			id:       "power.CLaims",
+			count:    15610,
+			datasize: 5,
+			keysize:  3,
+		},
 	}
-	dataSize := []int{
-		1,
-	}
+
 	// bucketsize-aka-arraywidth?  maybe someday.
-	for _, c := range kCounts {
-		for _, d := range dataSize {
-			for _, bw := range bitwidths {
-				benchFindCaseTable = append(benchFindCaseTable,
-					benchFindCase{
-						kcount:   c,
-						bitwidth: bw,
-						datasize: d,
-					})
-				for _, f := range flushIntervals {
-					benchFillCaseTable = append(benchFillCaseTable,
-						benchFillCase{
-							kcount:        c,
-							bitwidth:      bw,
-							datasize:      d,
-							flushInterval: f,
-						})
-					benchSetCaseTable = append(benchSetCaseTable,
-						benchSetCase{
-							kcount:        c,
-							bitwidth:      bw,
-							datasize:      d,
-							flushInterval: f,
-						})
-				}
-			}
+	for _, h := range hamts {
+		for _, bw := range bitwidths {
+			caseTable = append(caseTable,
+				benchCase{
+					id:       fmt.Sprintf("%s -- bw=%d", h.id, bw),
+					count:    h.count,
+					bitwidth: bw,
+					datasize: h.datasize,
+					keysize:  h.keysize,
+				})
 		}
 	}
 }
@@ -157,15 +166,15 @@ func init() {
 // See "BenchmarkSet*" for a probe of how long it takes to set additional entries in an already-large hamt
 // (this gives a more interesting and useful nanoseconds-per-op indicators).
 func BenchmarkFill(b *testing.B) {
-	for _, t := range benchFillCaseTable {
-		b.Run(fmt.Sprintf("n=%dk/bitwidth=%d", t.kcount, t.bitwidth), func(b *testing.B) {
+	for _, t := range caseTable {
+		b.Run(fmt.Sprintf("%s", t.id), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				r := rander{rand.New(rand.NewSource(int64(i)))}
 				blockstore := newMockBlocks()
 				n := NewNode(cbor.NewCborStore(blockstore), UseTreeBitWidth(t.bitwidth))
 				//b.ResetTimer()
-				for j := 0; j < t.kcount*1000; j++ {
-					if err := n.Set(context.Background(), r.randString(), r.randValue()); err != nil {
+				for j := 0; j < t.count; j++ {
+					if err := n.Set(context.Background(), r.randString(t.keysize), r.randValue(t.datasize)); err != nil {
 						b.Fatal(err)
 					}
 				}
@@ -179,56 +188,61 @@ func BenchmarkFill(b *testing.B) {
 				if blockstore.stats.evtcntPutDup > 0 {
 					b.Logf("on round N=%d: blockstore stats: %#v\n", b.N, blockstore.stats) // note: must refer to this before doing `n.checkSize`; that function has many effects.
 				}
-				b.ReportMetric(float64(blockstore.stats.evtcntGet)/float64(t.kcount*1000), "getEvts/entry")
-				b.ReportMetric(float64(blockstore.stats.evtcntPut)/float64(t.kcount*1000), "putEvts/entry")
-				b.ReportMetric(float64(len(blockstore.data))/float64(t.kcount*1000), "blocks/entry")
+				b.ReportMetric(float64(blockstore.stats.evtcntGet)/float64(t.count), "getEvts/entry")
+				b.ReportMetric(float64(blockstore.stats.evtcntPut)/float64(t.count), "putEvts/entry")
+				b.ReportMetric(float64(len(blockstore.data))/float64(t.count), "blocks/entry")
 				binarySize, _ := n.checkSize(context.Background())
-				b.ReportMetric(float64(binarySize)/float64(t.kcount*1000), "bytes(hamtAccnt)/entry")
-				b.ReportMetric(float64(blockstore.totalBlockSizes())/float64(t.kcount*1000), "bytes(blockstoreAccnt)/entry")
+				b.ReportMetric(float64(binarySize)/float64(t.count), "bytes(hamtAccnt)/entry")
+				b.ReportMetric(float64(blockstore.totalBlockSizes())/float64(t.count), "bytes(blockstoreAccnt)/entry")
 				b.StartTimer()
 			}
 		})
 	}
 }
 
-// BenchmarkSet creates a large HAMT, then starts the timer, and does another 1000 inserts,
+// BenchmarkSetBulk creates a large HAMT, then starts the timer, and does another 1000 inserts,
 // measuring the time taken for this second batch of inserts.
-// Flushing rate is parameterized.
+// Flushing happens once after all 1000 inserts.
 //
 // The number of *additional* blocks per entry is reported.
 // This number is usually less than one with high flush interval means changes might be amortized.
-// For flush interval one this number should be at least 1 --
-// however, since we choose random keys, it can still turn out lower if keys happen to collide.
-// (The Set method does not make it possible to adjust our denominator to compensate for this: it does not yield previous values nor indicators of prior presense.)
-func BenchmarkSet(b *testing.B) {
-	doBenchmarkSetSuite(b)
+func BenchmarkSetBulk(b *testing.B) {
+	doBenchmarkSetSuite(b, false)
 }
 
-func doBenchmarkSetSuite(b *testing.B) {
-	for j, t := range benchSetCaseTable {
-		b.Run(fmt.Sprintf("n=%dk/bitwidth=%d", t.kcount, t.bitwidth), func(b *testing.B) {
+// BenchmarkSetIndividual is the same as BenchmarkSetBulk, but flushes more.
+// Flush happens per insert.
+//
+// The number of *additional* blocks per entry is reported.
+// Since we flush each insert individually, this number should be at least 1.
+func BenchmarkSetIndividual(b *testing.B) {
+	doBenchmarkSetSuite(b, true)
+}
+
+func doBenchmarkSetSuite(b *testing.B, flushPer bool) {
+	for _, t := range caseTable {
+		b.Run(fmt.Sprintf("%s", t.id), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				b.StopTimer()
 				r := rander{rand.New(rand.NewSource(int64(i)))}
 				blockstore := newMockBlocks()
 				n := NewNode(cbor.NewCborStore(blockstore), UseTreeBitWidth(t.bitwidth))
 				// Initial fill:
-				for j := 0; j < t.kcount*1000; j++ {
-					if err := n.Set(context.Background(), r.randString(), r.randValue()); err != nil {
+				for j := 0; j < t.count; j++ {
+					if err := n.Set(context.Background(), r.randString(t.keysize), r.randValue(t.datasize)); err != nil {
 						b.Fatal(err)
 					}
 				}
 				if err := n.Flush(context.Background()); err != nil {
 					b.Fatal(err)
 				}
-				initalBlockstoreSize := len(blockstore.data)
 				//	b.ResetTimer()
 				blockstore.stats = blockstoreStats{}
 				// Additional inserts:
 				b.ReportAllocs()
 				b.StartTimer()
 				for j := 0; j < 1000; j++ {
-					if err := n.Set(context.Background(), r.randString(), r.randValue()); err != nil {
+					if err := n.Set(context.Background(), r.randString(t.keysize), r.randValue(t.datasize)); err != nil {
 						b.Fatal(err)
 					}
 					if flushPer {
@@ -249,9 +263,9 @@ func doBenchmarkSetSuite(b *testing.B) {
 				if blockstore.stats.evtcntPutDup > 0 {
 					b.Logf("on round N=%d: blockstore stats: %#v\n", b.N, blockstore.stats)
 				}
-				b.ReportMetric(float64(blockstore.stats.evtcntGet)/float64(t.kcount*1000), "getEvts/entry")
-				b.ReportMetric(float64(blockstore.stats.evtcntPut)/float64(t.kcount*1000), "putEvts/entry")
-				b.ReportMetric(float64(len(blockstore.data)-initalBlockstoreSize)/float64(1000), "addntlBlocks/addntlEntry")
+				b.ReportMetric(float64(blockstore.stats.evtcntGet)/1000, "getEvts/set")
+				b.ReportMetric(float64(blockstore.stats.evtcntPut)/1000, "putEvts/set")
+				b.ReportMetric(float64(blockstore.stats.bytesPut)/1000, "bytesPut/set")
 				b.StartTimer()
 			}
 		})
@@ -259,13 +273,13 @@ func doBenchmarkSetSuite(b *testing.B) {
 }
 
 func BenchmarkFind(b *testing.B) {
-	for _, t := range benchSetCaseTable {
-		b.Run(fmt.Sprintf("n=%dk/bitwidth=%d", t.kcount, t.bitwidth),
-			doBenchmarkEntriesCount(t.kcount*1000, t.bitwidth))
+	for _, t := range caseTable {
+		b.Run(fmt.Sprintf("%s", t.id),
+			doBenchmarkEntriesCount(t.count, t.bitwidth, t.datasize, t.keysize))
 	}
 }
 
-func doBenchmarkEntriesCount(num int, bitWidth int) func(b *testing.B) {
+func doBenchmarkEntriesCount(num int, bitWidth int, datasize int, keysize int) func(b *testing.B) {
 	r := rander{rand.New(rand.NewSource(int64(num)))}
 	return func(b *testing.B) {
 		blockstore := newMockBlocks()
@@ -274,8 +288,8 @@ func doBenchmarkEntriesCount(num int, bitWidth int) func(b *testing.B) {
 
 		var keys []string
 		for i := 0; i < num; i++ {
-			k := r.randString()
-			if err := n.Set(context.TODO(), k, r.randValue()); err != nil {
+			k := r.randString(keysize)
+			if err := n.Set(context.TODO(), k, r.randValue(datasize)); err != nil {
 				b.Fatal(err)
 			}
 			keys = append(keys, k)
