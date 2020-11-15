@@ -9,6 +9,7 @@ import (
 
 	cid "github.com/ipfs/go-cid"
 	cbor "github.com/ipfs/go-ipld-cbor"
+	"github.com/ipld/go-ipld-prime"
 	cbg "github.com/whyrusleeping/cbor-gen"
 	xerrors "golang.org/x/xerrors"
 )
@@ -78,6 +79,7 @@ type Node struct {
 
 	// for fetching and storing children
 	store cbor.IpldStore
+	proto ipld.NodePrototype
 }
 
 // Pointer is an element in a HAMT node's Pointers array, encoded as an IPLD
@@ -175,6 +177,14 @@ func UseTreeBitWidth(bitWidth int) Option {
 func UseHashFunction(hash func([]byte) []byte) Option {
 	return func(nd *Node) {
 		nd.hash = hash
+	}
+}
+
+// WithPrototype sets the ipld Prototype for the Hamt Node, to support
+// the use of the ipld MapIterator reconstruction of values.
+func WithPrototype(proto ipld.NodePrototype) Option {
+	return func(nd *Node) {
+		nd.proto = proto
 	}
 }
 
@@ -282,7 +292,7 @@ func (n *Node) getValue(ctx context.Context, hv *hashBits, k string, cb func(*KV
 	if c.isShard() {
 		// if isShard, we have a pointer to a child that we need to load and
 		// delegate our find operation to
-		chnd, err := c.loadChild(ctx, n.store, n.bitWidth, n.hash)
+		chnd, err := c.loadChild(ctx, n.store, n.bitWidth, n.hash, n.proto)
 		if err != nil {
 			return err
 		}
@@ -304,7 +314,7 @@ func (n *Node) getValue(ctx context.Context, hv *hashBits, k string, cb func(*KV
 
 // load a HAMT node from the IpldStore and pass on the (assumed) parameters
 // that are not stored with the node.
-func (p *Pointer) loadChild(ctx context.Context, ns cbor.IpldStore, bitWidth int, hash func([]byte) []byte) (*Node, error) {
+func (p *Pointer) loadChild(ctx context.Context, ns cbor.IpldStore, bitWidth int, hash func([]byte) []byte, proto ipld.NodePrototype) (*Node, error) {
 	if p.cache != nil {
 		return p.cache, nil
 	}
@@ -313,6 +323,7 @@ func (p *Pointer) loadChild(ctx context.Context, ns cbor.IpldStore, bitWidth int
 	if err != nil {
 		return nil, err
 	}
+	out.proto = proto
 
 	p.cache = out
 	return out, nil
@@ -430,7 +441,7 @@ func (n *Node) checkSize(ctx context.Context) (uint64, error) {
 	totsize := uint64(len(def.Raw))
 	for _, ch := range n.Pointers {
 		if ch.isShard() {
-			chnd, err := ch.loadChild(ctx, n.store, n.bitWidth, n.hash)
+			chnd, err := ch.loadChild(ctx, n.store, n.bitWidth, n.hash, n.proto)
 			if err != nil {
 				return 0, err
 			}
@@ -604,7 +615,7 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.D
 	if child.isShard() {
 		// if isShard, we have a pointer to a child that we need to load and
 		// delegate our modify operation to
-		chnd, err := child.loadChild(ctx, n.store, n.bitWidth, n.hash)
+		chnd, err := child.loadChild(ctx, n.store, n.bitWidth, n.hash, n.proto)
 		if err != nil {
 			return err
 		}
@@ -795,7 +806,7 @@ func (p *Pointer) isShard() bool {
 func (n *Node) ForEach(ctx context.Context, f func(k string, val interface{}) error) error {
 	for _, p := range n.Pointers {
 		if p.isShard() {
-			chnd, err := p.loadChild(ctx, n.store, n.bitWidth, n.hash)
+			chnd, err := p.loadChild(ctx, n.store, n.bitWidth, n.hash, n.proto)
 			if err != nil {
 				return err
 			}
