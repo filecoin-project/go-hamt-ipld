@@ -195,3 +195,94 @@ func (n *Node) ListIterator() ipld.ListIterator {
 func (n *Node) Prototype() ipld.NodePrototype {
 	return n.proto
 }
+
+func NewTypedHamt(key ipld.NodePrototype, value ipld.NodePrototype) ipld.NodePrototype {
+	return &hamtProto{key, value}
+}
+
+type hamtProto struct {
+	k ipld.NodePrototype
+	v ipld.NodePrototype
+}
+
+func (h *hamtProto) NewBuilder() ipld.NodeBuilder {
+	return &hamtBuilder{h, nil}
+}
+
+type hamtBuilder struct {
+	proto *hamtProto
+
+	n *Node
+}
+
+func (h *hamtBuilder) Build() ipld.Node {
+	return h.n
+}
+
+func (h *hamtBuilder) Reset() {
+	h.n = nil
+}
+
+func (h *hamtBuilder) BeginMap(sizeHint int) (ipld.MapAssembler, error) {
+	return h, nil
+}
+
+func (h *hamtBuilder) AssembleKey() ipld.NodeAssembler {
+	return nil
+}
+
+func (h *hamtBuilder) AssembleValue() ipld.NodeAssembler {
+	return nil
+}
+
+func (h *hamtBuilder) AssembleEntry(k string) (ipld.NodeAssembler, error) {
+	return nil, nil
+}
+
+func (h *hamtBuilder) Finish() error {
+	return nil
+}
+func (h *hamtBuilder) KeyPrototype() ipld.NodePrototype {
+	return h.proto.k
+}
+func (h *hamtBuilder) ValuePrototype(k string) ipld.NodePrototype {
+	return h.proto.v
+}
+
+func (h *hamtBuilder) BeginList(sizeHint int) (ipld.ListAssembler, error) {
+	return nil, ErrNotFound
+}
+func (h *hamtBuilder) AssignNull() error {
+	return ErrNotFound
+}
+func (h *hamtBuilder) AssignBool(bool) error {
+	return ErrNotFound
+}
+func (h *hamtBuilder) AssignInt(int) error {
+	return ErrNotFound
+}
+func (h *hamtBuilder) AssignFloat(float64) error {
+	return ErrNotFound
+}
+func (h *hamtBuilder) AssignString(string) error {
+	return ErrNotFound
+}
+func (h *hamtBuilder) AssignBytes([]byte) error {
+	return ErrNotFound
+}
+func (h *hamtBuilder) AssignLink(ipld.Link) error {
+	return ErrNotFound
+}
+
+func (h *hamtBuilder) AssignNode(n ipld.Node) error {
+	hn, ok := n.(*Node)
+	if !ok {
+		return ErrMalformedHamt
+	}
+	h.n = hn
+	return nil
+}
+
+func (h *hamtBuilder) Prototype() ipld.NodePrototype {
+	return h.proto
+}
