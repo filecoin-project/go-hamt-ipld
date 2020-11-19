@@ -110,16 +110,9 @@ type Pointer struct {
 	Link cid.Cid `refmt:"l,omitempty"`
 
 	// cached node to avoid too many serialization operations
-	// TODO(rvagg): we should check that this is actually used optimally. Flush()
-	// performs a save of all of the cached nodes, but both Copy() and loadChild()
-	// will set them. In the case of loadChild() we're not expecting a mutation so
-	// a save is likely going to mean we incur unnecessary serialization when
-	// we've simply inspected the tree. Copy() will only set a cached form if
-	// it already exists on the source. It's unclear exactly what Flush() is good
-	// for in its current form. Users may also need an advisory about memory
-	// usage of large graphs since they don't have control over this outside of
-	// Flush().
 	cache *Node
+	// dirty flag to indicate that the cached node needs to be flushed
+	dirty bool
 }
 
 // KV represents leaf storage within a HAMT node. A Pointer may hold up to
@@ -451,7 +444,7 @@ func (n *Node) checkSize(ctx context.Context) (uint64, error) {
 // child pointer exists in cached form.
 func (n *Node) Flush(ctx context.Context) error {
 	for _, p := range n.Pointers {
-		if p.cache != nil {
+		if p.cache != nil && p.dirty {
 			if err := p.cache.Flush(ctx); err != nil {
 				return err
 			}
@@ -461,7 +454,7 @@ func (n *Node) Flush(ctx context.Context) error {
 				return err
 			}
 
-			p.cache = nil
+			p.dirty = false
 			p.Link = c
 		}
 	}
@@ -613,6 +606,8 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.D
 			return err
 		}
 
+		child.dirty = true
+
 		// CHAMP optimization, ensure the HAMT retains its canonical form for the
 		// current data it contains. This may involve collapsing child nodes if
 		// they no longer contain enough elements to justify their stand-alone
@@ -659,13 +654,6 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.D
 	if len(child.KVs) >= bucketSize {
 		// bucket is full, create a child node (shard) with all existing bucket
 		// elements plus the new one and set it in the place of the bucket
-		// TODO(rvagg): this all of the modifyValue() calls are going to result
-		// in a store.Put(), this could be improved by allowing NewNode() to take
-		// the bulk set of elements, or modifying modifyValue() for the case
-		// where we know for sure that the elements will go into buckets and
-		// not cause an overflow - i.e. we just need to take each element, hash it
-		// and consume the correct number of bytes off the digest and figure out
-		// where it should be in the new node.
 		sub := NewNode(n.store)
 		sub.bitWidth = n.bitWidth
 		sub.hash = n.hash
@@ -675,18 +663,13 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.D
 		}
 
 		for _, p := range child.KVs {
-			chhv := &hashBits{b: n.hash([]byte(p.Key)), consumed: hv.consumed}
+			chhv := &hashBits{b: n.hash(p.Key), consumed: hv.consumed}
 			if err := sub.modifyValue(ctx, chhv, p.Key, p.Value); err != nil {
 				return err
 			}
 		}
 
-		c, err := n.store.Put(ctx, sub)
-		if err != nil {
-			return err
-		}
-
-		return n.setPointer(cindex, &Pointer{Link: c})
+		return n.setPointer(cindex, &Pointer{cache: sub, dirty: true})
 	}
 
 	// otherwise insert the new element into the array in order, the ordering is
@@ -768,6 +751,7 @@ func (n *Node) Copy() *Node {
 		pp := &Pointer{}
 		if p.cache != nil {
 			pp.cache = p.cache.Copy()
+			pp.dirty = p.dirty
 		}
 		pp.Link = p.Link
 		if p.KVs != nil {
@@ -785,7 +769,7 @@ func (n *Node) Copy() *Node {
 // Pointers elements can either contain a bucket of local elements or be a
 // link to a child node. In the case of a link, isShard() returns true.
 func (p *Pointer) isShard() bool {
-	return p.Link.Defined()
+	return p.cache != nil || p.Link.Defined()
 }
 
 // ForEach recursively calls function f on each k / val pair found in the HAMT.
