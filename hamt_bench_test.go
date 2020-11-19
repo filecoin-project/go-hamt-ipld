@@ -27,6 +27,11 @@ func (r *rander) randValue(datasize int) []byte {
 	return buf
 }
 
+func (r *rander) selectKey(keys []string) string {
+	i := rand.Int() % len(keys)
+	return keys[i]
+}
+
 func BenchmarkSerializeNode(b *testing.B) {
 	r := rander{rand.New(rand.NewSource(1234))}
 
@@ -87,42 +92,42 @@ func init() {
 			datasize: 3,
 			keysize:  26,
 		},
-		hamtParams{
-			id:       "market.PendingProposals",
-			count:    40713,
-			datasize: 151,
-			keysize:  38,
-		},
-		hamtParams{
-			id:       "market.EscrowWTable",
-			count:    2113,
-			datasize: 7,
-			keysize:  4,
-		},
-		hamtParams{
-			id:       "market.LockedTable",
-			count:    2098,
-			datasize: 4,
-			keysize:  4,
-		},
-		hamtParams{
-			id:       "market.DealOpsByEpoch",
-			count:    16558,
-			datasize: 43,
-			keysize:  3,
-		},
-		hamtParams{
-			id:       "power.CronEventQueue",
-			count:    60,
-			datasize: 43,
-			keysize:  3,
-		},
-		hamtParams{
-			id:       "power.CLaims",
-			count:    15610,
-			datasize: 5,
-			keysize:  3,
-		},
+		// hamtParams{
+		// 	id:       "market.PendingProposals",
+		// 	count:    40713,
+		// 	datasize: 151,
+		// 	keysize:  38,
+		// },
+		// hamtParams{
+		// 	id:       "market.EscrowWTable",
+		// 	count:    2113,
+		// 	datasize: 7,
+		// 	keysize:  4,
+		// },
+		// hamtParams{
+		// 	id:       "market.LockedTable",
+		// 	count:    2098,
+		// 	datasize: 4,
+		// 	keysize:  4,
+		// },
+		// hamtParams{
+		// 	id:       "market.DealOpsByEpoch",
+		// 	count:    16558,
+		// 	datasize: 43,
+		// 	keysize:  3,
+		// },
+		// hamtParams{
+		// 	id:       "power.CronEventQueue",
+		// 	count:    60,
+		// 	datasize: 43,
+		// 	keysize:  3,
+		// },
+		// hamtParams{
+		// 	id:       "power.CLaims",
+		// 	count:    15610,
+		// 	datasize: 5,
+		// 	keysize:  3,
+		// },
 	}
 
 	// bucketsize-aka-arraywidth?  maybe someday.
@@ -305,21 +310,83 @@ func doBenchmarkEntriesCount(num int, bitWidth int, datasize int, keysize int) f
 		}
 
 		runtime.GC()
-		blockstore.stats = blockstoreStats{}
 		b.ResetTimer()
 		b.ReportAllocs()
 
 		for i := 0; i < b.N; i++ {
-			nd, err := LoadNode(context.TODO(), cs, c, UseTreeBitWidth(bitWidth))
-			if err != nil {
-				b.Fatal(err)
+			blockstore.stats = blockstoreStats{}
+			for j := 0; j < 1000; j++ {
+				nd, err := LoadNode(context.TODO(), cs, c, UseTreeBitWidth(bitWidth))
+				if err != nil {
+					b.Fatal(err)
+				}
+				if err = nd.Find(context.TODO(), r.selectKey(keys), nil); err != nil {
+					b.Fatal(err)
+				}
 			}
-
-			if err = nd.Find(context.TODO(), keys[i%num], nil); err != nil {
-				b.Fatal(err)
-			}
+			b.StopTimer()
+			b.ReportMetric(float64(blockstore.stats.evtcntGet)/float64(1000), "getEvts/find")
+			b.ReportMetric(float64(blockstore.stats.evtcntPut)/float64(1000), "putEvts/find") // surely this is zero, but for completeness.
+			b.StartTimer()
 		}
-		b.ReportMetric(float64(blockstore.stats.evtcntGet)/float64(b.N), "getEvts/find")
-		b.ReportMetric(float64(blockstore.stats.evtcntPut)/float64(b.N), "putEvts/find") // surely this is zero, but for completeness.
+	}
+}
+
+func BenchmarkReset(b *testing.B) {
+	for _, t := range caseTable {
+		b.Run(fmt.Sprintf("%s", t.id),
+			doBenchmarkResetSuite(t.count, t.bitwidth, t.datasize, t.keysize))
+	}
+}
+
+func doBenchmarkResetSuite(num int, bitWidth int, datasize int, keysize int) func(b *testing.B) {
+	r := rander{rand.New(rand.NewSource(int64(num)))}
+	return func(b *testing.B) {
+		blockstore := newMockBlocks()
+		cs := cbor.NewCborStore(blockstore)
+		n := NewNode(cs, UseTreeBitWidth(bitWidth))
+
+		var keys []string
+		for i := 0; i < num; i++ {
+			k := r.randString(keysize)
+			if err := n.Set(context.TODO(), k, r.randValue(datasize)); err != nil {
+				b.Fatal(err)
+			}
+			keys = append(keys, k)
+		}
+
+		if err := n.Flush(context.TODO()); err != nil {
+			b.Fatal(err)
+		}
+
+		c, err := cs.Put(context.TODO(), n)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		runtime.GC()
+		b.ResetTimer()
+		b.ReportAllocs()
+
+		for i := 0; i < b.N; i++ {
+			blockstore.stats = blockstoreStats{}
+			for j := 0; j < 1000; j++ {
+				nd, err := LoadNode(context.TODO(), cs, c, UseTreeBitWidth(bitWidth))
+				if err != nil {
+					b.Fatal(err)
+				}
+				if err := nd.Set(context.Background(), r.selectKey(keys), r.randValue(datasize)); err != nil {
+					b.Fatal(err)
+				}
+				if err := nd.Flush(context.Background()); err != nil {
+					b.Fatal(err)
+				}
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(blockstore.stats.evtcntGet)/1000, "getEvts/set")
+			b.ReportMetric(float64(blockstore.stats.evtcntPut)/1000, "putEvts/set")
+			b.ReportMetric(float64(blockstore.stats.bytesPut)/1000, "bytesPut/set")
+			b.StartTimer()
+		}
 	}
 }
