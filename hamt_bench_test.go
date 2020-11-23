@@ -92,42 +92,42 @@ func init() {
 			datasize: 3,
 			keysize:  26,
 		},
-		// hamtParams{
-		// 	id:       "market.PendingProposals",
-		// 	count:    40713,
-		// 	datasize: 151,
-		// 	keysize:  38,
-		// },
-		// hamtParams{
-		// 	id:       "market.EscrowWTable",
-		// 	count:    2113,
-		// 	datasize: 7,
-		// 	keysize:  4,
-		// },
-		// hamtParams{
-		// 	id:       "market.LockedTable",
-		// 	count:    2098,
-		// 	datasize: 4,
-		// 	keysize:  4,
-		// },
-		// hamtParams{
-		// 	id:       "market.DealOpsByEpoch",
-		// 	count:    16558,
-		// 	datasize: 43,
-		// 	keysize:  3,
-		// },
-		// hamtParams{
-		// 	id:       "power.CronEventQueue",
-		// 	count:    60,
-		// 	datasize: 43,
-		// 	keysize:  3,
-		// },
-		// hamtParams{
-		// 	id:       "power.CLaims",
-		// 	count:    15610,
-		// 	datasize: 5,
-		// 	keysize:  3,
-		// },
+		hamtParams{
+			id:       "market.PendingProposals",
+			count:    40713,
+			datasize: 151,
+			keysize:  38,
+		},
+		hamtParams{
+			id:       "market.EscrowWTable",
+			count:    2113,
+			datasize: 7,
+			keysize:  4,
+		},
+		hamtParams{
+			id:       "market.LockedTable",
+			count:    2098,
+			datasize: 4,
+			keysize:  4,
+		},
+		hamtParams{
+			id:       "market.DealOpsByEpoch",
+			count:    16558,
+			datasize: 43,
+			keysize:  3,
+		},
+		hamtParams{
+			id:       "power.CronEventQueue",
+			count:    60,
+			datasize: 43,
+			keysize:  3,
+		},
+		hamtParams{
+			id:       "power.CLaims",
+			count:    15610,
+			datasize: 5,
+			keysize:  3,
+		},
 	}
 
 	// bucketsize-aka-arraywidth?  maybe someday.
@@ -193,9 +193,9 @@ func BenchmarkFill(b *testing.B) {
 				if blockstore.stats.evtcntPutDup > 0 {
 					b.Logf("on round N=%d: blockstore stats: %#v\n", b.N, blockstore.stats) // note: must refer to this before doing `n.checkSize`; that function has many effects.
 				}
-				b.ReportMetric(float64(blockstore.stats.evtcntGet)/float64(t.count), "getEvts/entry")
-				b.ReportMetric(float64(blockstore.stats.evtcntPut)/float64(t.count), "putEvts/entry")
-				b.ReportMetric(float64(len(blockstore.data))/float64(t.count), "blocks/entry")
+				b.ReportMetric(float64(blockstore.stats.evtcntGet)/float64(t.count), "getEvts")
+				b.ReportMetric(float64(blockstore.stats.evtcntPut)/float64(t.count), "putEvts")
+				b.ReportMetric(float64(len(blockstore.data))/float64(t.count), "blocks")
 				binarySize, _ := n.checkSize(context.Background())
 				b.ReportMetric(float64(binarySize)/float64(t.count), "bytes(hamtAccnt)/entry")
 				b.ReportMetric(float64(blockstore.totalBlockSizes())/float64(t.count), "bytes(blockstoreAccnt)/entry")
@@ -268,9 +268,9 @@ func doBenchmarkSetSuite(b *testing.B, flushPer bool) {
 				if blockstore.stats.evtcntPutDup > 0 {
 					b.Logf("on round N=%d: blockstore stats: %#v\n", b.N, blockstore.stats)
 				}
-				b.ReportMetric(float64(blockstore.stats.evtcntGet)/1000, "getEvts/set")
-				b.ReportMetric(float64(blockstore.stats.evtcntPut)/1000, "putEvts/set")
-				b.ReportMetric(float64(blockstore.stats.bytesPut)/1000, "bytesPut/set")
+				b.ReportMetric(float64(blockstore.stats.evtcntGet)/1000, "getEvts")
+				b.ReportMetric(float64(blockstore.stats.evtcntPut)/1000, "putEvts")
+				b.ReportMetric(float64(blockstore.stats.bytesPut)/1000, "bytesPut")
 				b.StartTimer()
 			}
 		})
@@ -325,8 +325,8 @@ func doBenchmarkEntriesCount(num int, bitWidth int, datasize int, keysize int) f
 				}
 			}
 			b.StopTimer()
-			b.ReportMetric(float64(blockstore.stats.evtcntGet)/float64(1000), "getEvts/find")
-			b.ReportMetric(float64(blockstore.stats.evtcntPut)/float64(1000), "putEvts/find") // surely this is zero, but for completeness.
+			b.ReportMetric(float64(blockstore.stats.evtcntGet)/float64(1000), "getEvts")
+			b.ReportMetric(float64(blockstore.stats.evtcntPut)/float64(1000), "putEvts") // surely this is zero, but for completeness.
 			b.StartTimer()
 		}
 	}
@@ -383,9 +383,9 @@ func doBenchmarkResetSuite(num int, bitWidth int, datasize int, keysize int) fun
 				}
 			}
 			b.StopTimer()
-			b.ReportMetric(float64(blockstore.stats.evtcntGet)/1000, "getEvts/set")
-			b.ReportMetric(float64(blockstore.stats.evtcntPut)/1000, "putEvts/set")
-			b.ReportMetric(float64(blockstore.stats.bytesPut)/1000, "bytesPut/set")
+			b.ReportMetric(float64(blockstore.stats.evtcntGet)/1000, "getEvts")
+			b.ReportMetric(float64(blockstore.stats.evtcntPut)/1000, "putEvts")
+			b.ReportMetric(float64(blockstore.stats.bytesPut)/1000, "bytesPut")
 			b.StartTimer()
 		}
 	}
