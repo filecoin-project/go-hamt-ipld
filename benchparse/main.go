@@ -13,8 +13,8 @@ import (
 )
 
 func main() {
-	if len(os.Args) < 2 {
-		panic("need to specify input file")
+	if len(os.Args) < 3 {
+		panic("need to specify input and output file")
 	}
 	fIn, err := os.Open(os.Args[1])
 	if err != nil {
@@ -35,7 +35,7 @@ func main() {
 		panic(err)
 	}
 
-	fOut, err := os.Create("out.csv")
+	fOut, err := os.Create(os.Args[2])
 	if err != nil {
 		panic(err)
 	}
