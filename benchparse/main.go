@@ -185,7 +185,7 @@ const EffectiveTimeGet = 11462
 const EffectiveTimePut = 35364
 
 const getsKey = "getEvts"
-const putsKey = "putsEvts"
+const putsKey = "putEvts"
 const bytesPutKey = "bytesPut"
 const timeKey = "time/op"
 
