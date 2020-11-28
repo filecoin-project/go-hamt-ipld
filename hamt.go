@@ -243,7 +243,8 @@ func (n *Node) FindRaw(ctx context.Context, k string) ([]byte, error) {
 // further nodes.
 func (n *Node) Delete(ctx context.Context, k string) error {
 	kb := []byte(k)
-	return n.modifyValue(ctx, &hashBits{b: n.hash(kb)}, kb, nil)
+	_, err := n.modifyValue(ctx, &hashBits{b: n.hash(kb)}, kb, nil)
+	return err
 }
 
 // handle the two Find operations in a recursive manner, where each node in the
@@ -483,7 +484,8 @@ func (n *Node) Set(ctx context.Context, k string, v interface{}) error {
 		d = &cbg.Deferred{Raw: b}
 	}
 
-	return n.modifyValue(ctx, &hashBits{b: n.hash(kb)}, kb, d)
+	_, err := n.modifyValue(ctx, &hashBits{b: n.hash(kb)}, kb, d)
+	return err
 }
 
 // SetRaw is similar to Set but sets key k in the HAMT to raw bytes without
@@ -492,7 +494,8 @@ func (n *Node) Set(ctx context.Context, k string, v interface{}) error {
 func (n *Node) SetRaw(ctx context.Context, k string, raw []byte) error {
 	d := &cbg.Deferred{Raw: raw}
 	kb := []byte(k)
-	return n.modifyValue(ctx, &hashBits{b: n.hash(kb)}, kb, d)
+	_, err := n.modifyValue(ctx, &hashBits{b: n.hash(kb)}, kb, d)
+	return err
 }
 
 // the number of links to child nodes this node contains
@@ -575,17 +578,17 @@ func (n *Node) cleanChild(chnd *Node, cindex byte) error {
 // cleanNode()). Recursive calls use the same arguments on child nodes but
 // note that `hv.Next()` is not idempotent. Each call will increment the number
 // of bits chomped off the hash digest for this key.
-func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.Deferred) error {
+func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.Deferred) (bool, error) {
 	idx, err := hv.Next(n.bitWidth)
 	if err != nil {
-		return ErrMaxDepth
+		return false, ErrMaxDepth
 	}
 
 	// if the element expected at this node isn't here then we can be sure it
 	// doesn't exist in the HAMT already and can insert it at the appropriate
 	// position.
 	if n.Bitfield.Bit(idx) != 1 {
-		return n.insertKV(idx, k, v)
+		return true, n.insertKV(idx, k, v)
 	}
 
 	// otherwise, the value is either local or in a child
@@ -599,11 +602,12 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.D
 		// delegate our modify operation to
 		chnd, err := child.loadChild(ctx, n.store, n.bitWidth, n.hash)
 		if err != nil {
-			return err
+			return false, err
 		}
 
-		if err := chnd.modifyValue(ctx, hv, k, v); err != nil {
-			return err
+		modified, err := chnd.modifyValue(ctx, hv, k, v)
+		if err != nil {
+			return false, err
 		}
 
 		child.dirty = true
@@ -614,11 +618,11 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.D
 		// existence.
 		if v == nil {
 			if err := n.cleanChild(chnd, cindex); err != nil {
-				return err
+				return false, err
 			}
 		}
 
-		return nil
+		return modified, nil
 	}
 
 	// if not isShard, then either the key/value pair is local here and can be
@@ -632,22 +636,22 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.D
 			if bytes.Equal(p.Key, k) {
 				if len(child.KVs) == 1 {
 					// last element in the bucket, remove it and update the bitfield
-					return n.rmPointer(cindex, idx)
+					return true, n.rmPointer(cindex, idx)
 				}
 
 				copy(child.KVs[i:], child.KVs[i+1:])
 				child.KVs = child.KVs[:len(child.KVs)-1]
-				return nil
+				return true, nil
 			}
 		}
-		return ErrNotFound
+		return false, ErrNotFound
 	}
 
 	// modify existing, check if key already exists
 	for _, p := range child.KVs {
 		if bytes.Equal(p.Key, k) {
 			p.Value = v
-			return nil
+			return true, nil
 		}
 	}
 
@@ -658,18 +662,18 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.D
 		sub.bitWidth = n.bitWidth
 		sub.hash = n.hash
 		hvcopy := &hashBits{b: hv.b, consumed: hv.consumed}
-		if err := sub.modifyValue(ctx, hvcopy, k, v); err != nil {
-			return err
+		if _, err := sub.modifyValue(ctx, hvcopy, k, v); err != nil {
+			return false, err
 		}
 
 		for _, p := range child.KVs {
 			chhv := &hashBits{b: n.hash(p.Key), consumed: hv.consumed}
-			if err := sub.modifyValue(ctx, chhv, p.Key, p.Value); err != nil {
-				return err
+			if _, err := sub.modifyValue(ctx, chhv, p.Key, p.Value); err != nil {
+				return false, err
 			}
 		}
 
-		return n.setPointer(cindex, &Pointer{cache: sub, dirty: true})
+		return true, n.setPointer(cindex, &Pointer{cache: sub, dirty: true})
 	}
 
 	// otherwise insert the new element into the array in order, the ordering is
@@ -678,11 +682,11 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.D
 	for i := 0; i < len(child.KVs); i++ {
 		if bytes.Compare(k, child.KVs[i].Key) < 0 {
 			child.KVs = append(child.KVs[:i], append([]*KV{np}, child.KVs[i:]...)...)
-			return nil
+			return true, nil
 		}
 	}
 	child.KVs = append(child.KVs, np)
-	return nil
+	return true, nil
 }
 
 // Insert a new key/value pair into the current node at the specified index.
