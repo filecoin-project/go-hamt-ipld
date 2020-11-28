@@ -488,6 +488,32 @@ func (n *Node) Set(ctx context.Context, k string, v interface{}) error {
 	return err
 }
 
+// SetIfAbsent sets key k to value v, where v is has a MarshalCBOR(bytes.Buffer)
+// method to encode it only if k is not already set. Returns true if the value
+// is set, false otherwise.
+func (n *Node) SetIfAbsent(ctx context.Context, k string, v interface{}) (bool, error) {
+	var d *cbg.Deferred
+
+	kb := []byte(k)
+
+	cm, ok := v.(cbg.CBORMarshaler)
+	if ok {
+		buf := new(bytes.Buffer)
+		if err := cm.MarshalCBOR(buf); err != nil {
+			return false, err
+		}
+		d = &cbg.Deferred{Raw: buf.Bytes()}
+	} else {
+		b, err := cbor.DumpObject(v)
+		if err != nil {
+			return false, err
+		}
+		d = &cbg.Deferred{Raw: b}
+	}
+
+	return n.modifyValue(ctx, &hashBits{b: n.hash(kb)}, kb, d, false)
+}
+
 // SetRaw is similar to Set but sets key k in the HAMT to raw bytes without
 // performing a DAG-CBOR marshal. The bytes may or may not be encoded DAG-CBOR
 // (see also FindRaw for fetching raw form).
