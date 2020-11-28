@@ -243,7 +243,7 @@ func (n *Node) FindRaw(ctx context.Context, k string) ([]byte, error) {
 // further nodes.
 func (n *Node) Delete(ctx context.Context, k string) error {
 	kb := []byte(k)
-	_, err := n.modifyValue(ctx, &hashBits{b: n.hash(kb)}, kb, nil)
+	_, err := n.modifyValue(ctx, &hashBits{b: n.hash(kb)}, kb, nil, true)
 	return err
 }
 
@@ -484,7 +484,7 @@ func (n *Node) Set(ctx context.Context, k string, v interface{}) error {
 		d = &cbg.Deferred{Raw: b}
 	}
 
-	_, err := n.modifyValue(ctx, &hashBits{b: n.hash(kb)}, kb, d)
+	_, err := n.modifyValue(ctx, &hashBits{b: n.hash(kb)}, kb, d, true)
 	return err
 }
 
@@ -494,7 +494,7 @@ func (n *Node) Set(ctx context.Context, k string, v interface{}) error {
 func (n *Node) SetRaw(ctx context.Context, k string, raw []byte) error {
 	d := &cbg.Deferred{Raw: raw}
 	kb := []byte(k)
-	_, err := n.modifyValue(ctx, &hashBits{b: n.hash(kb)}, kb, d)
+	_, err := n.modifyValue(ctx, &hashBits{b: n.hash(kb)}, kb, d, true)
 	return err
 }
 
@@ -578,7 +578,7 @@ func (n *Node) cleanChild(chnd *Node, cindex byte) error {
 // cleanNode()). Recursive calls use the same arguments on child nodes but
 // note that `hv.Next()` is not idempotent. Each call will increment the number
 // of bits chomped off the hash digest for this key.
-func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.Deferred) (bool, error) {
+func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.Deferred, overwrite bool) (bool, error) {
 	idx, err := hv.Next(n.bitWidth)
 	if err != nil {
 		return false, ErrMaxDepth
@@ -605,7 +605,7 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.D
 			return false, err
 		}
 
-		modified, err := chnd.modifyValue(ctx, hv, k, v)
+		modified, err := chnd.modifyValue(ctx, hv, k, v, overwrite)
 		if err != nil {
 			return false, err
 		}
@@ -650,8 +650,12 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.D
 	// modify existing, check if key already exists
 	for _, p := range child.KVs {
 		if bytes.Equal(p.Key, k) {
-			p.Value = v
-			return true, nil
+			if overwrite {
+				p.Value = v
+				return true, nil
+			} else {
+				return false, nil
+			}
 		}
 	}
 
@@ -662,13 +666,13 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.D
 		sub.bitWidth = n.bitWidth
 		sub.hash = n.hash
 		hvcopy := &hashBits{b: hv.b, consumed: hv.consumed}
-		if _, err := sub.modifyValue(ctx, hvcopy, k, v); err != nil {
+		if _, err := sub.modifyValue(ctx, hvcopy, k, v, overwrite); err != nil {
 			return false, err
 		}
 
 		for _, p := range child.KVs {
 			chhv := &hashBits{b: n.hash(p.Key), consumed: hv.consumed}
-			if _, err := sub.modifyValue(ctx, chhv, p.Key, p.Value); err != nil {
+			if _, err := sub.modifyValue(ctx, chhv, p.Key, p.Value, overwrite); err != nil {
 				return false, err
 			}
 		}
