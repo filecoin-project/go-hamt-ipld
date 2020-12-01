@@ -109,7 +109,29 @@ type Pointer struct {
 	KVs  []*KV   `refmt:"v,omitempty"`
 	Link cid.Cid `refmt:"l,omitempty"`
 
-	// cached node to avoid too many serialization operations
+	// cache is a pointer to an in-memory Node, which may or may not be
+	// present, and corresponds to the Link field, which also may or may not
+	// be present.
+	//
+	// If present, the cached Node should be semantically substitutable with
+	// the Link field. It makes no sense for a cache Node to be present if KVs
+	// is set. Link might not be set, if cache is present and is describing
+	// data that has never yet been serialized and stored.
+	//
+	// `loadChild` will short circut to return this node if the pointer isn't
+	// nil;
+	// `loadChild` will also set this pointer when loading a node that wasn't
+	// yet present cached.
+	// `Flush` on a `Node` will iterate through each `Pointer` and `Put` its
+	// cache node if:
+	// 1. The Pointer's cache is not nil
+	// 2. The Pointer's dirty flag is true
+	// (and also recurse to `Flush` on that `Node`) -- in other words,
+	// `Flush` writes out the cached data
+	// `Flush` will assign `Link` in the process of `Put`'ing the 'cache' data.
+	// `Copy` will copy any cached nodes, Link fields and dirty flags.
+	//
+	// `Link` becomes defined on`Flush`
 	cache *Node
 	// dirty flag to indicate that the cached node needs to be flushed
 	dirty bool
@@ -438,10 +460,23 @@ func (n *Node) checkSize(ctx context.Context) (uint64, error) {
 	return totsize, nil
 }
 
-// Flush saves and purges any cached Nodes recursively from this Node through
-// its (cached) children. Cached nodes primarily exist through the use of
-// Copy() operations where the entire graph is instantiated in memory and each
-// child pointer exists in cached form.
+// Flush has two effectis, it (partially!) persists data and resets dirty flag
+//
+// Flush operates recursively, telling each "cache" child node to flush;
+// Put'ing that "cache" node to the store;
+// updating this node's Link to the CID resulting from the store Put;
+// clearing the dirty flag of that pointer to flase
+// and then returning.
+// Flush doesn't operate unless there's a "cache" node.
+//
+// "cache" nodes were previously storing either updated values,
+// or, simply storing previously loaded data; these are disambiguated by the
+// dirty flag which is true when the cache node's data has not been persisted
+//
+// Notice that Flush _does not_ Put _this node_.
+// To fully persist changes, the caller still needs to Put this node to the
+// store themselves, and store the new resulting Link wherever they expect the
+// updated HAMT to be seen.
 func (n *Node) Flush(ctx context.Context) error {
 	for _, p := range n.Pointers {
 		if p.cache != nil && p.dirty {
@@ -463,6 +498,10 @@ func (n *Node) Flush(ctx context.Context) error {
 
 // Set key k to value v, where v is has a MarshalCBOR(bytes.Buffer) method to
 // encode it.
+//
+// To fully commit the change, it is necessary to Flush the root Node,
+// and then additionally Put the root node to the store itself,
+// and save the resulting CID wherever you expect the HAMT root to persist.
 func (n *Node) Set(ctx context.Context, k string, v interface{}) error {
 	var d *cbg.Deferred
 
@@ -596,7 +635,12 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.D
 	child := n.getPointer(cindex)
 	if child.isShard() {
 		// if isShard, we have a pointer to a child that we need to load and
-		// delegate our modify operation to
+		// delegate our modify operation to.
+		// Note that this loadChild operation will cause the loaded node to be
+		// "cached" and this pointer to be marked as dirty;
+		// it is an eventual Flush passing back over this "cache" node which
+		// causes the updates made to the in-memory "cache" node to eventually
+		// be persisted.
 		chnd, err := child.loadChild(ctx, n.store, n.bitWidth, n.hash)
 		if err != nil {
 			return err
