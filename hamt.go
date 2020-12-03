@@ -60,9 +60,6 @@ var ErrMalformedHamt = fmt.Errorf("HAMT node was malformed")
 // array. Indexes `[1]` and `[2]` are not present, but index `[3]` is at
 // the second position of our Pointers array.
 //
-// (Note: the `refmt` tags are ignored by cbor-gen which will generate an
-// array type rather than map.)
-//
 // The IPLD Schema representation of this data structure is as follows:
 //
 // 		type Node struct {
@@ -70,8 +67,8 @@ var ErrMalformedHamt = fmt.Errorf("HAMT node was malformed")
 // 			pointers [Pointer]
 // 		} representation tuple
 type Node struct {
-	Bitfield *big.Int   `refmt:"bf"`
-	Pointers []*Pointer `refmt:"p"`
+	Bitfield *big.Int
+	Pointers []*Pointer
 
 	bitWidth int
 	hash     func([]byte) []byte
@@ -82,10 +79,11 @@ type Node struct {
 
 // Pointer is an element in a HAMT node's Pointers array, encoded as an IPLD
 // tuple in DAG-CBOR of shape:
-//   {"0": CID} or {"1": [KV...]}
-// Where a map with a single key of "0" contains a Link, where a map with a
-// single key of "1" contains a KV bucket. The map may contain only one of
-// these two possible keys.
+//   CID or [KV...]
+// i.e. it is represented as a "kinded union" where a Link is a pointer to a
+// child node, while an array is a bucket of elements local to this node. A
+// Pointer must represent exactly one of of these two states and cannot be both
+// (or neither).
 //
 // There are between 1 and 2^bitWidth of these Pointers in any HAMT node.
 //
@@ -94,20 +92,17 @@ type Node struct {
 // the bucket is replaced with a link to a newly created HAMT node which will
 // contain the `bucketSize+1` elements in its own Pointers array.
 //
-// (Note: the `refmt` tags are ignored by cbor-gen which will generate an
-// array type rather than map.)
-//
 // The IPLD Schema representation of this data structure is as follows:
 //
 // 		type Pointer union {
-//			&Node "0"
-// 			Bucket "1"
-// 		} representation keyed
+//			&Node link
+// 			Bucket list
+// 		} representation kinded
 //
 //		type Bucket [KV]
 type Pointer struct {
-	KVs  []*KV   `refmt:"v,omitempty"`
-	Link cid.Cid `refmt:"l,omitempty"`
+	KVs  []*KV
+	Link cid.Cid
 
 	// cache is a pointer to an in-memory Node, which may or may not be
 	// present, and corresponds to the Link field, which also may or may not
@@ -389,6 +384,7 @@ func loadNode(
 		isLink := ch.isShard()
 		isBucket := ch.KVs != nil
 		if !((isLink && !isBucket) || (!isLink && isBucket)) {
+			// Pointer#UnmarshalCBOR shouldn't allow this
 			return nil, ErrMalformedHamt
 		}
 		if isLink && ch.Link.Type() != cid.DagCBOR { // not dag-cbor
