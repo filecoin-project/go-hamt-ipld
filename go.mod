@@ -5,11 +5,6 @@ require (
 	github.com/ipfs/go-block-format v0.0.2
 	github.com/ipfs/go-cid v0.0.7
 	github.com/ipfs/go-ipld-cbor v0.0.4
-	github.com/spaolacci/murmur3 v1.1.0
-	github.com/stretchr/testify v1.6.1
-	github.com/whyrusleeping/cbor-gen v0.0.0-20200806213330-63aa96ca5488
-	golang.org/x/perf v0.0.0-20200918155509-d949658356f9
-	golang.org/x/xerrors v0.0.0-20191204190536-9bdfabe68543
 	github.com/ipfs/go-ipld-format v0.0.2 // indirect
 	github.com/minio/sha256-simd v0.1.1 // indirect
 	github.com/multiformats/go-multihash v0.0.14 // indirect
@@ -17,6 +12,7 @@ require (
 	github.com/smartystreets/assertions v1.0.1 // indirect
 	github.com/smartystreets/goconvey v0.0.0-20190731233626-505e41936337 // indirect
 	github.com/spaolacci/murmur3 v1.1.0
+	github.com/stretchr/testify v1.6.1
 	github.com/warpfork/go-wish v0.0.0-20190328234359-8b3e70f8e830 // indirect
 	github.com/whyrusleeping/cbor-gen v0.0.0-20200812213548-958ddffe352c
 	golang.org/x/sys v0.0.0-20190626221950-04f50cda93cb // indirect
