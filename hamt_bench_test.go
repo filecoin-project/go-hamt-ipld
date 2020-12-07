@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/rand"
+	"os"
 	"runtime"
 	"testing"
 
@@ -15,26 +16,44 @@ type rander struct {
 	r *rand.Rand
 }
 
-func (r *rander) randString() string {
-	buf := make([]byte, 18)
-	rand.Read(buf)
+func (r *rander) randString(stringSize int) string {
+	buf := make([]byte, stringSize)
+	r.r.Read(buf)
 	return hex.EncodeToString(buf)
 }
 
-func (r *rander) randValue() []byte {
-	buf := make([]byte, 30)
-	rand.Read(buf)
+func (r *rander) randValue(datasize int) []byte {
+	buf := make([]byte, datasize)
+	r.r.Read(buf)
 	return buf
 }
 
+func (r *rander) selectKey(keys []string) string {
+	i := r.r.Int() % len(keys)
+	return keys[i]
+}
+
+var benchSeed = int64(42)
+
+func TestMain(m *testing.M) {
+	// Hack to run multiple different benchmark seed values
+	for benchMarkIter := int64(0); benchMarkIter < 3; benchMarkIter++ {
+		benchSeed = 42 + (100_000_000_000 * benchMarkIter) // We resample on every b.N so choose step size bigger than b.N values
+		if code := m.Run(); code != 0 {
+			os.Exit(code)
+		}
+	}
+	os.Exit(0)
+}
+
 func BenchmarkSerializeNode(b *testing.B) {
-	r := rander{rand.New(rand.NewSource(1234))}
+	r := rander{rand.New(rand.NewSource(benchSeed + 1234))}
 
 	cs := cbor.NewCborStore(newMockBlocks())
 	n := NewNode(cs)
 
 	for i := 0; i < 50; i++ {
-		if err := n.Set(context.TODO(), r.randString(), r.randValue()); err != nil {
+		if err := n.Set(context.TODO(), r.randString(18), r.randValue(30)); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -50,25 +69,28 @@ func BenchmarkSerializeNode(b *testing.B) {
 	}
 }
 
-type benchSetCase struct {
-	kcount   int
-	bitwidth int
+type hamtParams struct {
+	id       string
+	count    int
+	datasize int
+	keysize  int
 }
 
-var benchSetCaseTable []benchSetCase
+type benchCase struct {
+	id       string
+	count    int
+	bitwidth int
+	datasize int
+	keysize  int
+}
+
+var caseTable []benchCase
 
 func init() {
-	kCounts := []int{
-		1,
-		5,
-		10,
-		50,
-		100,
-		500,
-		1000, // aka 1M
-		//10000, // aka 10M -- you'll need a lot of RAM for this.  Also, some patience.
-	}
+
 	bitwidths := []int{
+		1,
+		2,
 		3,
 		4,
 		5,
@@ -76,10 +98,39 @@ func init() {
 		7,
 		8,
 	}
+
+	hamts := []hamtParams{
+		hamtParams{
+			id:       "init.AddressMap.Now",
+			count:    100000,
+			datasize: 3,
+			keysize:  26,
+		},
+		hamtParams{
+			id:       "init.AddressMap.ThreeMonths",
+			count:    167000,
+			datasize: 3,
+			keysize:  26,
+		},
+		hamtParams{
+			id:       "init.AddressMap.SixMonths",
+			count:    240000,
+			datasize: 3,
+			keysize:  26,
+		},
+	}
+
 	// bucketsize-aka-arraywidth?  maybe someday.
-	for _, c := range kCounts {
+	for _, h := range hamts {
 		for _, bw := range bitwidths {
-			benchSetCaseTable = append(benchSetCaseTable, benchSetCase{kcount: c, bitwidth: bw})
+			caseTable = append(caseTable,
+				benchCase{
+					id:       fmt.Sprintf("%s -- bw=%d", h.id, bw),
+					count:    h.count,
+					bitwidth: bw,
+					datasize: h.datasize,
+					keysize:  h.keysize,
+				})
 		}
 	}
 }
@@ -110,15 +161,15 @@ func init() {
 // See "BenchmarkSet*" for a probe of how long it takes to set additional entries in an already-large hamt
 // (this gives a more interesting and useful nanoseconds-per-op indicators).
 func BenchmarkFill(b *testing.B) {
-	for _, t := range benchSetCaseTable {
-		b.Run(fmt.Sprintf("n=%dk/bitwidth=%d", t.kcount, t.bitwidth), func(b *testing.B) {
+	for _, t := range caseTable {
+		b.Run(fmt.Sprintf("%s", t.id), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				r := rander{rand.New(rand.NewSource(int64(i)))}
+				r := rander{rand.New(rand.NewSource(benchSeed + int64(i)))}
 				blockstore := newMockBlocks()
 				n := NewNode(cbor.NewCborStore(blockstore), UseTreeBitWidth(t.bitwidth))
 				//b.ResetTimer()
-				for j := 0; j < t.kcount*1000; j++ {
-					if err := n.Set(context.Background(), r.randString(), r.randValue()); err != nil {
+				for j := 0; j < t.count; j++ {
+					if err := n.Set(context.Background(), r.randString(t.keysize), r.randValue(t.datasize)); err != nil {
 						b.Fatal(err)
 					}
 				}
@@ -132,24 +183,24 @@ func BenchmarkFill(b *testing.B) {
 				if blockstore.stats.evtcntPutDup > 0 {
 					b.Logf("on round N=%d: blockstore stats: %#v\n", b.N, blockstore.stats) // note: must refer to this before doing `n.checkSize`; that function has many effects.
 				}
-				b.ReportMetric(float64(blockstore.stats.evtcntGet)/float64(t.kcount*1000), "getEvts/entry")
-				b.ReportMetric(float64(blockstore.stats.evtcntPut)/float64(t.kcount*1000), "putEvts/entry")
-				b.ReportMetric(float64(len(blockstore.data))/float64(t.kcount*1000), "blocks/entry")
+				b.ReportMetric(float64(blockstore.stats.evtcntGet)/float64(t.count), "getEvts")
+				b.ReportMetric(float64(blockstore.stats.evtcntPut)/float64(t.count), "putEvts")
+				b.ReportMetric(float64(len(blockstore.data))/float64(t.count), "blocks")
 				binarySize, _ := n.checkSize(context.Background())
-				b.ReportMetric(float64(binarySize)/float64(t.kcount*1000), "bytes(hamtAccnt)/entry")
-				b.ReportMetric(float64(blockstore.totalBlockSizes())/float64(t.kcount*1000), "bytes(blockstoreAccnt)/entry")
+				b.ReportMetric(float64(binarySize)/float64(t.count), "bytes(hamtAccnt)/entry")
+				b.ReportMetric(float64(blockstore.totalBlockSizes())/float64(t.count), "bytes(blockstoreAccnt)/entry")
 				b.StartTimer()
 			}
 		})
 	}
 }
 
-// BenchmarkSetBulk creates a large HAMT, then resets the timer, and does another 1000 inserts,
+// BenchmarkSetBulk creates a large HAMT, then starts the timer, and does another 1000 inserts,
 // measuring the time taken for this second batch of inserts.
 // Flushing happens once after all 1000 inserts.
 //
 // The number of *additional* blocks per entry is reported.
-// This number is usually less than one, because the bulk flush means changes might be amortized.
+// This number is usually less than one with high flush interval means changes might be amortized.
 func BenchmarkSetBulk(b *testing.B) {
 	doBenchmarkSetSuite(b, false)
 }
@@ -158,36 +209,35 @@ func BenchmarkSetBulk(b *testing.B) {
 // Flush happens per insert.
 //
 // The number of *additional* blocks per entry is reported.
-// Since we flush each insert individually, this number should be at least 1 --
-// however, since we choose random keys, it can still turn out lower if keys happen to collide.
-// (The Set method does not make it possible to adjust our denominator to compensate for this: it does not yield previous values nor indicators of prior presense.)
+// Since we flush each insert individually, this number should be at least 1.
 func BenchmarkSetIndividual(b *testing.B) {
 	doBenchmarkSetSuite(b, true)
 }
 
 func doBenchmarkSetSuite(b *testing.B, flushPer bool) {
-	for _, t := range benchSetCaseTable {
-		b.Run(fmt.Sprintf("n=%dk/bitwidth=%d", t.kcount, t.bitwidth), func(b *testing.B) {
+	for _, t := range caseTable {
+		b.Run(fmt.Sprintf("%s", t.id), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				r := rander{rand.New(rand.NewSource(int64(i)))}
+				b.StopTimer()
+				r := rander{rand.New(rand.NewSource(benchSeed + int64(i)))}
 				blockstore := newMockBlocks()
 				n := NewNode(cbor.NewCborStore(blockstore), UseTreeBitWidth(t.bitwidth))
 				// Initial fill:
-				for j := 0; j < t.kcount*1000; j++ {
-					if err := n.Set(context.Background(), r.randString(), r.randValue()); err != nil {
+				for j := 0; j < t.count; j++ {
+					if err := n.Set(context.Background(), r.randString(t.keysize), r.randValue(t.datasize)); err != nil {
 						b.Fatal(err)
 					}
 				}
 				if err := n.Flush(context.Background()); err != nil {
 					b.Fatal(err)
 				}
-				initalBlockstoreSize := len(blockstore.data)
-				b.ResetTimer()
+				//	b.ResetTimer()
 				blockstore.stats = blockstoreStats{}
 				// Additional inserts:
 				b.ReportAllocs()
+				b.StartTimer()
 				for j := 0; j < 1000; j++ {
-					if err := n.Set(context.Background(), r.randString(), r.randValue()); err != nil {
+					if err := n.Set(context.Background(), r.randString(t.keysize), r.randValue(t.datasize)); err != nil {
 						b.Fatal(err)
 					}
 					if flushPer {
@@ -208,9 +258,9 @@ func doBenchmarkSetSuite(b *testing.B, flushPer bool) {
 				if blockstore.stats.evtcntPutDup > 0 {
 					b.Logf("on round N=%d: blockstore stats: %#v\n", b.N, blockstore.stats)
 				}
-				b.ReportMetric(float64(blockstore.stats.evtcntGet)/float64(t.kcount*1000), "getEvts/entry")
-				b.ReportMetric(float64(blockstore.stats.evtcntPut)/float64(t.kcount*1000), "putEvts/entry")
-				b.ReportMetric(float64(len(blockstore.data)-initalBlockstoreSize)/float64(1000), "addntlBlocks/addntlEntry")
+				b.ReportMetric(float64(blockstore.stats.evtcntGet)/1000, "getEvts")
+				b.ReportMetric(float64(blockstore.stats.evtcntPut)/1000, "putEvts")
+				b.ReportMetric(float64(blockstore.stats.bytesPut)/1000, "bytesPut")
 				b.StartTimer()
 			}
 		})
@@ -218,14 +268,14 @@ func doBenchmarkSetSuite(b *testing.B, flushPer bool) {
 }
 
 func BenchmarkFind(b *testing.B) {
-	for _, t := range benchSetCaseTable {
-		b.Run(fmt.Sprintf("n=%dk/bitwidth=%d", t.kcount, t.bitwidth),
-			doBenchmarkEntriesCount(t.kcount*1000, t.bitwidth))
+	for _, t := range caseTable {
+		b.Run(fmt.Sprintf("%s", t.id),
+			doBenchmarkEntriesCount(t.count, t.bitwidth, t.datasize, t.keysize))
 	}
 }
 
-func doBenchmarkEntriesCount(num int, bitWidth int) func(b *testing.B) {
-	r := rander{rand.New(rand.NewSource(int64(num)))}
+func doBenchmarkEntriesCount(num int, bitWidth int, datasize int, keysize int) func(b *testing.B) {
+	r := rander{rand.New(rand.NewSource(benchSeed + int64(num)))}
 	return func(b *testing.B) {
 		blockstore := newMockBlocks()
 		cs := cbor.NewCborStore(blockstore)
@@ -233,8 +283,8 @@ func doBenchmarkEntriesCount(num int, bitWidth int) func(b *testing.B) {
 
 		var keys []string
 		for i := 0; i < num; i++ {
-			k := r.randString()
-			if err := n.Set(context.TODO(), k, r.randValue()); err != nil {
+			k := r.randString(keysize)
+			if err := n.Set(context.TODO(), k, r.randValue(datasize)); err != nil {
 				b.Fatal(err)
 			}
 			keys = append(keys, k)
@@ -250,21 +300,83 @@ func doBenchmarkEntriesCount(num int, bitWidth int) func(b *testing.B) {
 		}
 
 		runtime.GC()
-		blockstore.stats = blockstoreStats{}
 		b.ResetTimer()
 		b.ReportAllocs()
 
 		for i := 0; i < b.N; i++ {
-			nd, err := LoadNode(context.TODO(), cs, c, UseTreeBitWidth(bitWidth))
-			if err != nil {
-				b.Fatal(err)
+			blockstore.stats = blockstoreStats{}
+			for j := 0; j < 1000; j++ {
+				nd, err := LoadNode(context.TODO(), cs, c, UseTreeBitWidth(bitWidth))
+				if err != nil {
+					b.Fatal(err)
+				}
+				if err = nd.Find(context.TODO(), r.selectKey(keys), nil); err != nil {
+					b.Fatal(err)
+				}
 			}
-
-			if err = nd.Find(context.TODO(), keys[i%num], nil); err != nil {
-				b.Fatal(err)
-			}
+			b.StopTimer()
+			b.ReportMetric(float64(blockstore.stats.evtcntGet)/float64(1000), "getEvts")
+			b.ReportMetric(float64(blockstore.stats.evtcntPut)/float64(1000), "putEvts") // surely this is zero, but for completeness.
+			b.StartTimer()
 		}
-		b.ReportMetric(float64(blockstore.stats.evtcntGet)/float64(b.N), "getEvts/find")
-		b.ReportMetric(float64(blockstore.stats.evtcntPut)/float64(b.N), "putEvts/find") // surely this is zero, but for completeness.
+	}
+}
+
+func BenchmarkReset(b *testing.B) {
+	for _, t := range caseTable {
+		b.Run(fmt.Sprintf("%s", t.id),
+			doBenchmarkResetSuite(t.count, t.bitwidth, t.datasize, t.keysize))
+	}
+}
+
+func doBenchmarkResetSuite(num int, bitWidth int, datasize int, keysize int) func(b *testing.B) {
+	r := rander{rand.New(rand.NewSource(benchSeed + int64(num)))}
+	return func(b *testing.B) {
+		blockstore := newMockBlocks()
+		cs := cbor.NewCborStore(blockstore)
+		n := NewNode(cs, UseTreeBitWidth(bitWidth))
+
+		var keys []string
+		for i := 0; i < num; i++ {
+			k := r.randString(keysize)
+			if err := n.Set(context.TODO(), k, r.randValue(datasize)); err != nil {
+				b.Fatal(err)
+			}
+			keys = append(keys, k)
+		}
+
+		if err := n.Flush(context.TODO()); err != nil {
+			b.Fatal(err)
+		}
+
+		c, err := cs.Put(context.TODO(), n)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		runtime.GC()
+		b.ResetTimer()
+		b.ReportAllocs()
+
+		for i := 0; i < b.N; i++ {
+			blockstore.stats = blockstoreStats{}
+			for j := 0; j < 1000; j++ {
+				nd, err := LoadNode(context.TODO(), cs, c, UseTreeBitWidth(bitWidth))
+				if err != nil {
+					b.Fatal(err)
+				}
+				if err := nd.Set(context.Background(), r.selectKey(keys), r.randValue(datasize)); err != nil {
+					b.Fatal(err)
+				}
+				if err := nd.Flush(context.Background()); err != nil {
+					b.Fatal(err)
+				}
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(blockstore.stats.evtcntGet)/1000, "getEvts")
+			b.ReportMetric(float64(blockstore.stats.evtcntPut)/1000, "putEvts")
+			b.ReportMetric(float64(blockstore.stats.bytesPut)/1000, "bytesPut")
+			b.StartTimer()
+		}
 	}
 }
