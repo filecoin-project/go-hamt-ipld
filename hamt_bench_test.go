@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/rand"
+	"os"
 	"runtime"
 	"testing"
 
@@ -17,23 +18,36 @@ type rander struct {
 
 func (r *rander) randString(stringSize int) string {
 	buf := make([]byte, stringSize)
-	rand.Read(buf)
+	r.r.Read(buf)
 	return hex.EncodeToString(buf)
 }
 
 func (r *rander) randValue(datasize int) []byte {
 	buf := make([]byte, datasize)
-	rand.Read(buf)
+	r.r.Read(buf)
 	return buf
 }
 
 func (r *rander) selectKey(keys []string) string {
-	i := rand.Int() % len(keys)
+	i := r.r.Int() % len(keys)
 	return keys[i]
 }
 
+var benchSeed = int64(42)
+
+func TestMain(m *testing.M) {
+	// Hack to run multiple different benchmark seed values
+	for benchMarkIter := int64(0); benchMarkIter < 3; benchMarkIter++ {
+		benchSeed = 42 + (100_000_000_000 * benchMarkIter) // We resample on every b.N so choose step size bigger than b.N values
+		if code := m.Run(); code != 0 {
+			os.Exit(code)
+		}
+	}
+	os.Exit(0)
+}
+
 func BenchmarkSerializeNode(b *testing.B) {
-	r := rander{rand.New(rand.NewSource(1234))}
+	r := rander{rand.New(rand.NewSource(benchSeed + 1234))}
 
 	cs := cbor.NewCborStore(newMockBlocks())
 	n := NewNode(cs)
@@ -87,46 +101,22 @@ func init() {
 
 	hamts := []hamtParams{
 		hamtParams{
-			id:       "init.AddressMap",
-			count:    55649,
+			id:       "init.AddressMap.Now",
+			count:    100000,
 			datasize: 3,
 			keysize:  26,
 		},
 		hamtParams{
-			id:       "market.PendingProposals",
-			count:    40713,
-			datasize: 151,
-			keysize:  38,
+			id:       "init.AddressMap.ThreeMonths",
+			count:    167000,
+			datasize: 3,
+			keysize:  26,
 		},
 		hamtParams{
-			id:       "market.EscrowWTable",
-			count:    2113,
-			datasize: 7,
-			keysize:  4,
-		},
-		hamtParams{
-			id:       "market.LockedTable",
-			count:    2098,
-			datasize: 4,
-			keysize:  4,
-		},
-		hamtParams{
-			id:       "market.DealOpsByEpoch",
-			count:    16558,
-			datasize: 43,
-			keysize:  3,
-		},
-		hamtParams{
-			id:       "power.CronEventQueue",
-			count:    60,
-			datasize: 43,
-			keysize:  3,
-		},
-		hamtParams{
-			id:       "power.CLaims",
-			count:    15610,
-			datasize: 5,
-			keysize:  3,
+			id:       "init.AddressMap.SixMonths",
+			count:    240000,
+			datasize: 3,
+			keysize:  26,
 		},
 	}
 
@@ -174,7 +164,7 @@ func BenchmarkFill(b *testing.B) {
 	for _, t := range caseTable {
 		b.Run(fmt.Sprintf("%s", t.id), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				r := rander{rand.New(rand.NewSource(int64(i)))}
+				r := rander{rand.New(rand.NewSource(benchSeed + int64(i)))}
 				blockstore := newMockBlocks()
 				n := NewNode(cbor.NewCborStore(blockstore), UseTreeBitWidth(t.bitwidth))
 				//b.ResetTimer()
@@ -229,7 +219,7 @@ func doBenchmarkSetSuite(b *testing.B, flushPer bool) {
 		b.Run(fmt.Sprintf("%s", t.id), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				b.StopTimer()
-				r := rander{rand.New(rand.NewSource(int64(i)))}
+				r := rander{rand.New(rand.NewSource(benchSeed + int64(i)))}
 				blockstore := newMockBlocks()
 				n := NewNode(cbor.NewCborStore(blockstore), UseTreeBitWidth(t.bitwidth))
 				// Initial fill:
@@ -285,7 +275,7 @@ func BenchmarkFind(b *testing.B) {
 }
 
 func doBenchmarkEntriesCount(num int, bitWidth int, datasize int, keysize int) func(b *testing.B) {
-	r := rander{rand.New(rand.NewSource(int64(num)))}
+	r := rander{rand.New(rand.NewSource(benchSeed + int64(num)))}
 	return func(b *testing.B) {
 		blockstore := newMockBlocks()
 		cs := cbor.NewCborStore(blockstore)
@@ -340,7 +330,7 @@ func BenchmarkReset(b *testing.B) {
 }
 
 func doBenchmarkResetSuite(num int, bitWidth int, datasize int, keysize int) func(b *testing.B) {
-	r := rander{rand.New(rand.NewSource(int64(num)))}
+	r := rander{rand.New(rand.NewSource(benchSeed + int64(num)))}
 	return func(b *testing.B) {
 		blockstore := newMockBlocks()
 		cs := cbor.NewCborStore(blockstore)
