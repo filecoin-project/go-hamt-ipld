@@ -587,26 +587,21 @@ func TestSetIfAbsent(t *testing.T) {
 	val1 := []byte("owl bear")
 	key := "favorite-animal"
 	success, err := begn.SetIfAbsent(ctx, key, val1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	if !success {
 		t.Fatal("expected fresh set to work")
 	}
 
 	val2 := []byte("bright green bear")
 	success, err = begn.SetIfAbsent(ctx, key, val2)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	if success {
 		t.Fatal("expected duplicate set to fail")
 	}
 
 	success, err = begn.SetIfAbsent(ctx, key, val1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	if success {
 		t.Fatal("expected duplicate set with same value to also fail")
 	}
@@ -616,18 +611,12 @@ func TestSetIfAbsent(t *testing.T) {
 		t.Fatal(err)
 	}
 	c, err := cs.Put(ctx, begn)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	n, err := LoadNode(ctx, cs, c)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	success, err = n.SetIfAbsent(ctx, key, val2)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	if success {
 		t.Fatal("expected duplicate set after flush to fail")
 	}
@@ -642,23 +631,14 @@ func TestSetWithNoEffectDoesNotPut(t *testing.T) {
 	// Fill up the root node so flushes actually Put to store
 	fillUpEntries := 2 * bucketSize * 5 // do 5 x the amount needed to fill up root node to fill with high probability
 	for i := 0; i < fillUpEntries; i++ {
-		if err := begn.Set(ctx, strconv.Itoa(i), []byte("filler")); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, begn.Set(ctx, strconv.Itoa(i), []byte("filler")))
 	}
-	if err := begn.Flush(ctx); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, begn.Flush(ctx))
 
 	key := "favorite-animal"
 	val1 := []byte("bright green bear")
-	err := begn.Set(ctx, key, val1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := begn.Flush(ctx); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, begn.Set(ctx, key, val1))
+	require.NoError(t, begn.Flush(ctx))
 
 	firstPutCount := mb.stats.evtcntPut
 	if firstPutCount <= 0 {
@@ -666,13 +646,9 @@ func TestSetWithNoEffectDoesNotPut(t *testing.T) {
 	}
 
 	// Set does not change key value mapping
-	err = begn.Set(ctx, key, val1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := begn.Flush(ctx); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, begn.Set(ctx, key, val1))
+	require.NoError(t, begn.Flush(ctx))
+
 	secondPutCount := mb.stats.evtcntPut
 	if secondPutCount != firstPutCount {
 		t.Fatalf("expected first Put count %d to equal second Put count %d", firstPutCount, secondPutCount)

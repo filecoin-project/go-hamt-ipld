@@ -21,22 +21,22 @@ const defaultBitWidth = 8
 
 //-----------------------------------------------------------------------------
 // Boolean constants
-type overwrite = bool
+type overwrite bool
 
 const (
 	// use OVERWRITE for modifyValue operations that overwrite existing values
-	OVERWRITE = true
+	OVERWRITE = overwrite(true)
 	// use NOVERWRITE for modifyValue operations that cannot overwrite existing values
-	NOVERWRITE = false
+	NOVERWRITE = overwrite(false)
 )
 
 type modified bool
 
 const (
 	// return MODIFIED when a key value mapping is overwritten
-	MODIFIED = true
+	MODIFIED = modified(true)
 	// return UNMODIFIED when a no key value mappings are overwritten
-	UNMODIFIED = false
+	UNMODIFIED = modified(false)
 )
 
 //-----------------------------------------------------------------------------
@@ -510,7 +510,7 @@ func (n *Node) Set(ctx context.Context, k string, v interface{}) error {
 
 // SetIfAbsent sets key k to value v only if k is not already set to some value.
 // Returns true if the value mapped to k is changed by this operation
-// is set, false otherwise.
+// false otherwise.
 func (n *Node) SetIfAbsent(ctx context.Context, k string, v interface{}) (bool, error) {
 	var d *cbg.Deferred
 
@@ -625,7 +625,7 @@ func (n *Node) cleanChild(chnd *Node, cindex byte) error {
 // cleanNode()). Recursive calls use the same arguments on child nodes but
 // note that `hv.Next()` is not idempotent. Each call will increment the number
 // of bits chomped off the hash digest for this key.
-func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.Deferred, overwrite bool) (modified, error) {
+func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.Deferred, replace overwrite) (modified, error) {
 	idx, err := hv.Next(n.bitWidth)
 	if err != nil {
 		return UNMODIFIED, ErrMaxDepth
@@ -652,7 +652,7 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.D
 			return UNMODIFIED, err
 		}
 
-		modified, err := chnd.modifyValue(ctx, hv, k, v, overwrite)
+		modified, err := chnd.modifyValue(ctx, hv, k, v, replace)
 		if err != nil {
 			return UNMODIFIED, err
 		}
@@ -691,13 +691,13 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.D
 				return MODIFIED, nil
 			}
 		}
-		return false, ErrNotFound
+		return UNMODIFIED, ErrNotFound
 	}
 
 	// modify existing, check if key already exists
 	for _, p := range child.KVs {
 		if bytes.Equal(p.Key, k) {
-			if overwrite && !bytes.Equal(p.Value.Raw, v.Raw) {
+			if bool(replace) && !bytes.Equal(p.Value.Raw, v.Raw) {
 				p.Value = v
 				return MODIFIED, nil
 			}
@@ -712,13 +712,13 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.D
 		sub.bitWidth = n.bitWidth
 		sub.hash = n.hash
 		hvcopy := &hashBits{b: hv.b, consumed: hv.consumed}
-		if _, err := sub.modifyValue(ctx, hvcopy, k, v, overwrite); err != nil {
+		if _, err := sub.modifyValue(ctx, hvcopy, k, v, replace); err != nil {
 			return UNMODIFIED, err
 		}
 
 		for _, p := range child.KVs {
 			chhv := &hashBits{b: n.hash(p.Key), consumed: hv.consumed}
-			if _, err := sub.modifyValue(ctx, chhv, p.Key, p.Value, overwrite); err != nil {
+			if _, err := sub.modifyValue(ctx, chhv, p.Key, p.Value, replace); err != nil {
 				return UNMODIFIED, err
 			}
 		}
