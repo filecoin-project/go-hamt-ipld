@@ -10,7 +10,6 @@ import (
 	cid "github.com/ipfs/go-cid"
 	cbor "github.com/ipfs/go-ipld-cbor"
 	cbg "github.com/whyrusleeping/cbor-gen"
-	xerrors "golang.org/x/xerrors"
 )
 
 //-----------------------------------------------------------------------------
@@ -240,22 +239,14 @@ func NewNode(cs cbor.IpldStore, options ...Option) *Node {
 //
 // Depending on the size of the HAMT, this method may load a large number of
 // child nodes via the HAMT's IpldStore.
-func (n *Node) Find(ctx context.Context, k string, out interface{}) error {
+func (n *Node) Find(ctx context.Context, k string, out cbg.CBORUnmarshaler) error {
 	return n.getValue(ctx, &hashBits{b: n.hash([]byte(k))}, k, func(kv *KV) error {
-		// used to just see if the thing exists in the set
+		// Test testing if the key exists.
+		// Note that an interface pointer-to-nil is not == nil and, if received here, will panic.
 		if out == nil {
 			return nil
 		}
-
-		if um, ok := out.(cbg.CBORUnmarshaler); ok {
-			return um.UnmarshalCBOR(bytes.NewReader(kv.Value.Raw))
-		}
-
-		if err := cbor.DecodeInto(kv.Value.Raw, out); err != nil {
-			return xerrors.Errorf("cbor decoding value: %w", err)
-		}
-
-		return nil
+		return out.UnmarshalCBOR(bytes.NewReader(kv.Value.Raw))
 	})
 }
 
@@ -375,7 +366,6 @@ func loadNode(
 	hashFunction func([]byte) []byte,
 	options ...Option,
 ) (*Node, error) {
-
 	var out Node
 	if err := cs.Get(ctx, c, &out); err != nil {
 		return nil, err
@@ -519,54 +509,40 @@ func (n *Node) Flush(ctx context.Context) error {
 // To fully commit the change, it is necessary to Flush the root Node,
 // and then additionally Put the root node to the store itself,
 // and save the resulting CID wherever you expect the HAMT root to persist.
-func (n *Node) Set(ctx context.Context, k string, v interface{}) error {
-	var d *cbg.Deferred
-
-	kb := []byte(k)
-
-	cm, ok := v.(cbg.CBORMarshaler)
-	if ok {
-		buf := new(bytes.Buffer)
-		if err := cm.MarshalCBOR(buf); err != nil {
-			return err
-		}
-		d = &cbg.Deferred{Raw: buf.Bytes()}
+func (n *Node) Set(ctx context.Context, k string, v cbg.CBORMarshaler) error {
+	var d cbg.Deferred
+	if v == nil {
+		d.Raw = cbg.CborNull
 	} else {
-		b, err := cbor.DumpObject(v)
-		if err != nil {
+		valueBuf := new(bytes.Buffer)
+		if err := v.MarshalCBOR(valueBuf); err != nil {
 			return err
 		}
-		d = &cbg.Deferred{Raw: b}
+		d.Raw = valueBuf.Bytes()
 	}
 
-	_, err := n.modifyValue(ctx, &hashBits{b: n.hash(kb)}, kb, d, OVERWRITE)
+	keyBytes := []byte(k)
+	_, err := n.modifyValue(ctx, &hashBits{b: n.hash(keyBytes)}, keyBytes, &d, OVERWRITE)
 	return err
 }
 
 // SetIfAbsent sets key k to value v only if k is not already set to some value.
 // Returns true if the value mapped to k is changed by this operation
 // false otherwise.
-func (n *Node) SetIfAbsent(ctx context.Context, k string, v interface{}) (bool, error) {
-	var d *cbg.Deferred
-
-	kb := []byte(k)
-
-	cm, ok := v.(cbg.CBORMarshaler)
-	if ok {
-		buf := new(bytes.Buffer)
-		if err := cm.MarshalCBOR(buf); err != nil {
-			return false, err
-		}
-		d = &cbg.Deferred{Raw: buf.Bytes()}
+func (n *Node) SetIfAbsent(ctx context.Context, k string, v cbg.CBORMarshaler) (bool, error) {
+	var d cbg.Deferred
+	if v == nil {
+		d.Raw = cbg.CborNull
 	} else {
-		b, err := cbor.DumpObject(v)
-		if err != nil {
+		valueBuf := new(bytes.Buffer)
+		if err := v.MarshalCBOR(valueBuf); err != nil {
 			return false, err
 		}
-		d = &cbg.Deferred{Raw: b}
+		d.Raw = valueBuf.Bytes()
 	}
 
-	modified, err := n.modifyValue(ctx, &hashBits{b: n.hash(kb)}, kb, d, NOVERWRITE)
+	keyBytes := []byte(k)
+	modified, err := n.modifyValue(ctx, &hashBits{b: n.hash(keyBytes)}, keyBytes, &d, NOVERWRITE)
 	return bool(modified), err
 }
 
@@ -868,9 +844,9 @@ func (p *Pointer) isShard() bool {
 
 // ForEach recursively calls function f on each k / val pair found in the HAMT.
 // This performs a full traversal of the graph and for large HAMTs can cause
-// a large number of loads from the IpldStore. This should not be used lightly
-// as it can incur large costs.
-func (n *Node) ForEach(ctx context.Context, f func(k string, val interface{}) error) error {
+// a large number of loads from the underlying store.
+// The values are returned as raw bytes, not decoded.
+func (n *Node) ForEach(ctx context.Context, f func(k string, val *cbg.Deferred) error) error {
 	for _, p := range n.Pointers {
 		if p.isShard() {
 			chnd, err := p.loadChild(ctx, n.store, n.bitWidth, n.hash)
