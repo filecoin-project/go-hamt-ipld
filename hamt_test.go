@@ -114,16 +114,16 @@ func (h blockSizesHistogram) String() string {
 	return v + "]"
 }
 
-func randString() string {
+func randKey() string {
 	buf := make([]byte, 18)
 	rand.Read(buf)
 	return hex.EncodeToString(buf)
 }
 
-func randValue() []byte {
-	buf := make([]byte, 30)
+func randValue() *CborByteArray {
+	buf := CborByteArray(make([]byte, 30))
 	rand.Read(buf)
-	return buf
+	return &buf
 }
 
 func dotGraph(n *Node) {
@@ -168,18 +168,18 @@ func TestOverflow(t *testing.T) {
 	cs := cbor.NewCborStore(newMockBlocks())
 	n := NewNode(cs, UseHashFunction(identityHash))
 	for _, k := range keys[:3] {
-		if err := n.Set(context.Background(), k, "foobar"); err != nil {
+		if err := n.Set(context.Background(), k, cborstr("foobar")); err != nil {
 			t.Error(err)
 		}
 	}
 
 	// Try forcing the depth beyond 32
-	if err := n.Set(context.Background(), keys[3], "bad"); err != ErrMaxDepth {
+	if err := n.Set(context.Background(), keys[3], cborstr("bad")); err != ErrMaxDepth {
 		t.Errorf("expected error %q, got %q", ErrMaxDepth, err)
 	}
 
 	// Force _to_ max depth.
-	if err := n.Set(context.Background(), keys[3][1:], "bad"); err != nil {
+	if err := n.Set(context.Background(), keys[3][1:], cborstr("bad")); err != nil {
 		t.Error(err)
 	}
 
@@ -360,7 +360,7 @@ func TestFillAndCollapse(t *testing.T) {
 
 func addAndRemoveKeys(t *testing.T, keys []string, extraKeys []string, options ...Option) {
 	ctx := context.Background()
-	vals := make(map[string][]byte)
+	vals := make(map[string]*CborByteArray)
 	for i := 0; i < len(keys); i++ {
 		s := keys[i]
 		vals[s] = randValue()
@@ -393,12 +393,12 @@ func addAndRemoveKeys(t *testing.T, keys []string, extraKeys []string, options .
 	n.hash = begn.hash
 	n.bitWidth = begn.bitWidth
 	for k, v := range vals {
-		var out []byte
+		var out CborByteArray
 		err := n.Find(ctx, k, &out)
 		if err != nil {
 			t.Fatalf("should have found the thing (err: %s)", err)
 		}
-		if !bytes.Equal(out, v) {
+		if !bytes.Equal(out, *v) {
 			t.Fatalf("got wrong value after value change: %x != %x", out, v)
 		}
 	}
@@ -545,13 +545,13 @@ func testBasic(t *testing.T, options ...Option) {
 	cs := cbor.NewCborStore(newMockBlocks())
 	begn := NewNode(cs, options...)
 
-	val := []byte("cat dog bear")
+	val := cborstr("cat dog bear")
 	if err := begn.Set(ctx, "foo", val); err != nil {
 		t.Fatal(err)
 	}
 
 	for i := 0; i < 1000; i++ {
-		if err := begn.Set(ctx, randString(), randValue()); err != nil {
+		if err := begn.Set(ctx, randKey(), randValue()); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -569,12 +569,12 @@ func testBasic(t *testing.T, options ...Option) {
 		t.Fatal(err)
 	}
 
-	var out []byte
+	var out CborByteArray
 	if err := n.Find(ctx, "foo", &out); err != nil {
 		t.Fatal(err)
 	}
 
-	if !bytes.Equal(out, val) {
+	if !bytes.Equal(out, *val) {
 		t.Fatal("out bytes were wrong: ", out)
 	}
 }
@@ -584,7 +584,7 @@ func TestSetIfAbsent(t *testing.T) {
 	cs := cbor.NewCborStore(newMockBlocks())
 	begn := NewNode(cs)
 
-	val1 := []byte("owl bear")
+	val1 := cborstr("owl bear")
 	key := "favorite-animal"
 	success, err := begn.SetIfAbsent(ctx, key, val1)
 	require.NoError(t, err)
@@ -592,7 +592,7 @@ func TestSetIfAbsent(t *testing.T) {
 		t.Fatal("expected fresh set to work")
 	}
 
-	val2 := []byte("bright green bear")
+	val2 := cborstr("bright green bear")
 	success, err = begn.SetIfAbsent(ctx, key, val2)
 	require.NoError(t, err)
 	if success {
@@ -631,12 +631,12 @@ func TestSetWithNoEffectDoesNotPut(t *testing.T) {
 	// Fill up the root node so flushes actually Put to store
 	fillUpEntries := 2 * bucketSize * 5 // do 5 x the amount needed to fill up root node to fill with high probability
 	for i := 0; i < fillUpEntries; i++ {
-		require.NoError(t, begn.Set(ctx, strconv.Itoa(i), []byte("filler")))
+		require.NoError(t, begn.Set(ctx, strconv.Itoa(i), cborstr("filler")))
 	}
 	require.NoError(t, begn.Flush(ctx))
 
 	key := "favorite-animal"
-	val1 := []byte("bright green bear")
+	val1 := cborstr("bright green bear")
 	require.NoError(t, begn.Set(ctx, key, val1))
 	require.NoError(t, begn.Flush(ctx))
 
@@ -660,13 +660,13 @@ func TestDelete(t *testing.T) {
 	cs := cbor.NewCborStore(newMockBlocks())
 	begn := NewNode(cs)
 
-	val := []byte("cat dog bear")
+	val := cborstr("cat dog bear")
 	if err := begn.Set(ctx, "foo", val); err != nil {
 		t.Fatal(err)
 	}
 
 	for i := 0; i < 10; i++ {
-		if err := begn.Set(ctx, randString(), randValue()); err != nil {
+		if err := begn.Set(ctx, randKey(), randValue()); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -688,7 +688,7 @@ func TestDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var out []byte
+	var out CborByteArray
 	if err := n.Find(ctx, "foo", &out); err == nil {
 		t.Fatal("shouldnt have found object")
 	}
@@ -696,10 +696,10 @@ func TestDelete(t *testing.T) {
 
 func TestSetGet(t *testing.T) {
 	ctx := context.Background()
-	vals := make(map[string][]byte)
+	vals := make(map[string]*CborByteArray)
 	var keys []string
 	for i := 0; i < 100000; i++ {
-		s := randString()
+		s := randKey()
 		vals[s] = randValue()
 		keys = append(keys, s)
 	}
@@ -718,7 +718,7 @@ func TestSetGet(t *testing.T) {
 	}
 	mapsize := 0
 	for k, v := range vals {
-		mapsize += (len(k) + len(v))
+		mapsize += (len(k) + len(*v))
 	}
 	fmt.Printf("Total size is: %d, size of keys+vals: %d, overhead: %.2f\n", size, mapsize, float64(size)/float64(mapsize))
 	fmt.Println(stats(begn))
@@ -745,18 +745,18 @@ func TestSetGet(t *testing.T) {
 	//for k, v := range vals {
 	for _, k := range keys {
 		v := vals[k]
-		var out []byte
+		var out CborByteArray
 		if err := n.Find(ctx, k, &out); err != nil {
 			t.Fatal("should have found the thing: ", err)
 		}
-		if !bytes.Equal(out, v) {
+		if !bytes.Equal(out, *v) {
 			t.Fatal("got wrong value")
 		}
 	}
 	fmt.Println("finds took: ", time.Since(bef))
 
 	for i := 0; i < 100; i++ {
-		err := n.Find(ctx, randString(), nil)
+		err := n.Find(ctx, randKey(), nil)
 		if err != ErrNotFound {
 			t.Fatal("should have gotten ErrNotFound, instead got: ", err)
 		}
@@ -769,18 +769,18 @@ func TestSetGet(t *testing.T) {
 	}
 
 	for k, v := range vals {
-		var out []byte
+		var out CborByteArray
 		err := n.Find(ctx, k, &out)
 		if err != nil {
 			t.Fatal("should have found the thing")
 		}
-		if !bytes.Equal(out, v) {
+		if !bytes.Equal(out, *v) {
 			t.Fatal("got wrong value after value change")
 		}
 	}
 
 	for i := 0; i < 100; i++ {
-		err := n.Delete(ctx, randString())
+		err := n.Delete(ctx, randKey())
 		if err != ErrNotFound {
 			t.Fatal("should have gotten ErrNotFound, instead got: ", err)
 		}
@@ -832,7 +832,7 @@ func TestReloadEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := on.Set(ctx, "foo", "bar"); err != nil {
+	if err := on.Set(ctx, "foo", cborstr("bar")); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -846,12 +846,12 @@ func TestCopy(t *testing.T) {
 	if !nodesEqual(t, cs, n, nc) {
 		t.Fatal("nodes should be equal")
 	}
-	n.Set(ctx, "key", []byte{0x01})
+	n.Set(ctx, "key", cborstr("a"))
 	if nodesEqual(t, cs, n, nc) {
 		t.Fatal("nodes should not be equal -- we set a key on n")
 	}
 	nc = n.Copy()
-	nc.Set(ctx, "key2", []byte{0x02})
+	nc.Set(ctx, "key2", cborstr("b"))
 	if nodesEqual(t, cs, n, nc) {
 		t.Fatal("nodes should not be equal -- we set a key on nc")
 	}
@@ -886,13 +886,15 @@ func TestCopyWithoutFlush(t *testing.T) {
 	count := 200
 	n := NewNode(cs)
 	for i := 0; i < count; i++ {
-		n.Set(ctx, fmt.Sprintf("key%d", i), []byte{byte(i)})
+		v := cbg.CborInt(i)
+		n.Set(ctx, fmt.Sprintf("key%d", i), &v)
 	}
 
 	n.Flush(ctx)
 
 	for i := 0; i < count; i++ {
-		n.Set(ctx, fmt.Sprintf("key%d", i), []byte{byte(count + i)})
+		v := cbg.CborInt(count + i)
+		n.Set(ctx, fmt.Sprintf("key%d", i), &v)
 	}
 
 	nc := n.Copy()
@@ -900,61 +902,20 @@ func TestCopyWithoutFlush(t *testing.T) {
 	for i := 0; i < count; i++ {
 		key := fmt.Sprintf("key%d", i)
 
-		var val []byte
+		var val cbg.CborInt
 		if err := n.Find(ctx, key, &val); err != nil {
 			t.Fatalf("should have found key %s in original", key)
 		}
 
-		var valCopy []byte
+		var valCopy cbg.CborInt
 		if err := nc.Find(ctx, key, &valCopy); err != nil {
 			t.Fatalf("should have found key %s in copy", key)
 		}
 
-		if val[0] != valCopy[0] {
-			t.Fatalf("copy does not equal original (%d != %d)", valCopy[0], val[0])
+		if val != valCopy {
+			t.Fatalf("copy does not equal original (%d != %d)", valCopy, val)
 		}
 	}
-}
-
-func TestValueLinking(t *testing.T) {
-	ctx := context.Background()
-	cs := cbor.NewCborStore(newMockBlocks())
-
-	thingy1 := map[string]string{"cat": "dog"}
-	c1, err := cs.Put(ctx, thingy1)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	thingy2 := map[string]interface{}{
-		"one": c1,
-		"foo": "bar",
-	}
-
-	n := NewNode(cs)
-
-	if err := n.Set(ctx, "cat", thingy2); err != nil {
-		t.Fatal(err)
-	}
-
-	tcid, err := cs.Put(ctx, n)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	blk, err := cs.Blocks.Get(tcid)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	fmt.Printf("BLOCK DATA: %x\n", blk.RawData())
-	nd, err := cbor.DecodeBlock(blk)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	fmt.Println("thingy1", c1)
-	fmt.Println(nd.Links()[0])
 }
 
 func TestSetNilValues(t *testing.T) {
@@ -1297,7 +1258,7 @@ func TestCleanChildOrdering(t *testing.T) {
 		n := binary.PutUvarint(buf, i)
 		return string(buf[:n])
 	}
-	dummyValue := []byte{0xaa, 0xbb, 0xcc, 0xdd}
+	dummyValue := cbg.CborInt(42)
 
 	ctx := context.Background()
 	cs := cbor.NewCborStore(newMockBlocks())
@@ -1312,7 +1273,7 @@ func TestCleanChildOrdering(t *testing.T) {
 	h := NewNode(cs, hamtOptions...)
 
 	for i := uint64(100); i < uint64(195); i++ {
-		err := h.Set(ctx, makeKey(i), dummyValue)
+		err := h.Set(ctx, makeKey(i), &dummyValue)
 		require.NoError(t, err)
 	}
 

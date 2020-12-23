@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	cbor "github.com/ipfs/go-ipld-cbor"
+	cbg "github.com/whyrusleeping/cbor-gen"
 )
 
 type rander struct {
@@ -21,10 +22,10 @@ func (r *rander) randString() string {
 	return hex.EncodeToString(buf)
 }
 
-func (r *rander) randValue() []byte {
+func (r *rander) randValue() *cbg.Deferred {
 	buf := make([]byte, 30)
 	rand.Read(buf)
-	return buf
+	return &cbg.Deferred{Raw: buf}
 }
 
 func BenchmarkSerializeNode(b *testing.B) {
