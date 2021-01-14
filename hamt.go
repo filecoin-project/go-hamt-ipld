@@ -13,12 +13,6 @@ import (
 )
 
 //-----------------------------------------------------------------------------
-// Defaults
-
-const bucketSize = 3
-const defaultBitWidth = 8
-
-//-----------------------------------------------------------------------------
 // Boolean constants
 type overwrite bool
 
@@ -59,6 +53,9 @@ var ErrMalformedHamt = fmt.Errorf("HAMT node was malformed")
 //-----------------------------------------------------------------------------
 // Serialized data structures
 
+// HashFunc is a hashing function for values.
+type HashFunc func([]byte) []byte
+
 // Node is a single point in the HAMT, encoded as an IPLD tuple in DAG-CBOR of
 // shape:
 //   [bytes, [Pointer...]]
@@ -86,7 +83,7 @@ type Node struct {
 	Pointers []*Pointer
 
 	bitWidth int
-	hash     func([]byte) []byte
+	hash     HashFunc
 
 	// for fetching and storing children
 	store cbor.IpldStore
@@ -165,45 +162,6 @@ type KV struct {
 }
 
 //-----------------------------------------------------------------------------
-// Options
-
-// Option is a function that configures the node
-//
-// See UseTreeBitWidth and UseHashFunction
-type Option func(*Node)
-
-// UseTreeBitWidth allows you to set a custom bitWidth of the HAMT in bits
-// (from 1-8).
-//
-// Passing in the returned Option to NewNode will generate a new HAMT that uses
-// the specified bitWidth.
-//
-// The default bitWidth is 8.
-func UseTreeBitWidth(bitWidth int) Option {
-	return func(nd *Node) {
-		if bitWidth > 0 && bitWidth <= 8 {
-			nd.bitWidth = bitWidth
-		}
-	}
-}
-
-// UseHashFunction allows you to set the hash function used for internal
-// indexing by the HAMT.
-//
-// Passing in the returned Option to NewNode will generate a new HAMT that uses
-// the specified hash function.
-//
-// The default hash function is murmur3-x64 but you should use a
-// cryptographically secure function such as SHA2-256 if an attacker may be
-// able to pick the keys in order to avoid potential hash collision (tree
-// explosion) attacks.
-func UseHashFunction(hash func([]byte) []byte) Option {
-	return func(nd *Node) {
-		nd.hash = hash
-	}
-}
-
-//-----------------------------------------------------------------------------
 // Instance and helpers functions
 
 // NewNode creates a new IPLD HAMT Node with the given IPLD store and any
@@ -211,19 +169,15 @@ func UseHashFunction(hash func([]byte) []byte) Option {
 //
 // This function creates a new HAMT that you can use directly and is also
 // used internally to create child nodes.
-func NewNode(cs cbor.IpldStore, options ...Option) *Node {
-	nd := &Node{
-		Bitfield: big.NewInt(0),
-		Pointers: make([]*Pointer, 0),
-		store:    cs,
-		hash:     defaultHashFunction,
-		bitWidth: defaultBitWidth,
-	}
-	// apply functional options to node before using
+func NewNode(cs cbor.IpldStore, options ...Option) (*Node, error) {
+	cfg := defaultConfig()
 	for _, option := range options {
-		option(nd)
+		if err := option(cfg); err != nil {
+			return nil, err
+		}
 	}
-	return nd
+
+	return newNode(cs, cfg.hashFn, cfg.bitWidth), nil
 }
 
 // Find navigates through the HAMT structure to where key `k` should exist. If
@@ -274,6 +228,18 @@ func (n *Node) Delete(ctx context.Context, k string) (bool, error) {
 	kb := []byte(k)
 	modified, err := n.modifyValue(ctx, &hashBits{b: n.hash(kb)}, kb, nil, OVERWRITE)
 	return modified == MODIFIED, err
+}
+
+// Constructs a new node value.
+func newNode(cs cbor.IpldStore, hashFn HashFunc, bitWidth int) *Node {
+	nd := &Node{
+		Bitfield: big.NewInt(0),
+		Pointers: make([]*Pointer, 0),
+		bitWidth: bitWidth,
+		hash:     hashFn,
+		store:    cs,
+	}
+	return nd
 }
 
 // handle the two Find operations in a recursive manner, where each node in the
@@ -328,7 +294,7 @@ func (n *Node) getValue(ctx context.Context, hv *hashBits, k string, cb func(*KV
 
 // load a HAMT node from the IpldStore and pass on the (assumed) parameters
 // that are not stored with the node.
-func (p *Pointer) loadChild(ctx context.Context, ns cbor.IpldStore, bitWidth int, hash func([]byte) []byte) (*Node, error) {
+func (p *Pointer) loadChild(ctx context.Context, ns cbor.IpldStore, bitWidth int, hash HashFunc) (*Node, error) {
 	if p.cache != nil {
 		return p.cache, nil
 	}
@@ -354,7 +320,13 @@ func (p *Pointer) loadChild(ctx context.Context, ns cbor.IpldStore, bitWidth int
 // of this library to remain the defaults long-term and have strategies in
 // place to manage variations.
 func LoadNode(ctx context.Context, cs cbor.IpldStore, c cid.Cid, options ...Option) (*Node, error) {
-	return loadNode(ctx, cs, c, true, defaultBitWidth, defaultHashFunction, options...)
+	cfg := defaultConfig()
+	for _, option := range options {
+		if err := option(cfg); err != nil {
+			return nil, err
+		}
+	}
+	return loadNode(ctx, cs, c, true, cfg.bitWidth, cfg.hashFn)
 }
 
 // internal version of loadNode that is aware of whether this is a root node or
@@ -365,8 +337,7 @@ func loadNode(
 	c cid.Cid,
 	isRoot bool,
 	bitWidth int,
-	hashFunction func([]byte) []byte,
-	options ...Option,
+	hashFunction HashFunc,
 ) (*Node, error) {
 	var out Node
 	if err := cs.Get(ctx, c, &out); err != nil {
@@ -376,10 +347,7 @@ func loadNode(
 	out.store = cs
 	out.bitWidth = bitWidth
 	out.hash = hashFunction
-	// apply functional options to node before using
-	for _, option := range options {
-		option(&out)
-	}
+
 
 	// Validation
 
@@ -729,9 +697,7 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.D
 	if len(child.KVs) >= bucketSize {
 		// bucket is full, create a child node (shard) with all existing bucket
 		// elements plus the new one and set it in the place of the bucket
-		sub := NewNode(n.store)
-		sub.bitWidth = n.bitWidth
-		sub.hash = n.hash
+		sub := newNode(n.store, n.hash, n.bitWidth)
 		hvcopy := &hashBits{b: hv.b, consumed: hv.consumed}
 		if _, err := sub.modifyValue(ctx, hvcopy, k, v, replace); err != nil {
 			return UNMODIFIED, err
@@ -812,9 +778,7 @@ func (n *Node) getPointer(i byte) *Pointer {
 // as cached nodes.
 func (n *Node) Copy() *Node {
 	// TODO(rvagg): clarify what situations this method is actually useful for.
-	nn := NewNode(n.store)
-	nn.bitWidth = n.bitWidth
-	nn.hash = n.hash
+	nn := newNode(n.store, n.hash, n.bitWidth)
 	nn.Bitfield.Set(n.Bitfield)
 	nn.Pointers = make([]*Pointer, len(n.Pointers))
 
