@@ -33,12 +33,12 @@ func BenchmarkSerializeNode(b *testing.B) {
 	r := rander{rand.New(rand.NewSource(1234))}
 
 	cs := cbor.NewCborStore(newMockBlocks())
-	n := NewNode(cs)
+	n, err := NewNode(cs)
+	require.NoError(b, err)
 
 	for i := 0; i < 50; i++ {
-		if err := n.Set(context.TODO(), r.randString(), r.randValue()); err != nil {
-			b.Fatal(err)
-		}
+		err := n.Set(context.TODO(), r.randString(), r.randValue())
+		require.NoError(b, err)
 	}
 
 	b.ResetTimer()
@@ -46,9 +46,7 @@ func BenchmarkSerializeNode(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		_, err := cs.Put(context.TODO(), n)
-		if err != nil {
-			b.Fatal(err)
-		}
+		require.NoError(b, err)
 	}
 }
 
@@ -117,16 +115,16 @@ func BenchmarkFill(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				r := rander{rand.New(rand.NewSource(int64(i)))}
 				blockstore := newMockBlocks()
-				n := NewNode(cbor.NewCborStore(blockstore), UseTreeBitWidth(t.bitwidth))
+				n, err := NewNode(cbor.NewCborStore(blockstore), UseTreeBitWidth(t.bitwidth))
+				require.NoError(b, err)
 				//b.ResetTimer()
 				for j := 0; j < t.kcount*1000; j++ {
-					if err := n.Set(context.Background(), r.randString(), r.randValue()); err != nil {
-						b.Fatal(err)
-					}
+					err := n.Set(context.Background(), r.randString(), r.randValue())
+					require.NoError(b, err)
 				}
-				if err := n.Flush(context.Background()); err != nil {
-					b.Fatal(err)
-				}
+				err = n.Flush(context.Background())
+				require.NoError(b, err)
+
 				b.StopTimer()
 				if i < 3 {
 					//b.Logf("block size histogram: %v\n", blockstore.getBlockSizesHistogram())
@@ -173,35 +171,29 @@ func doBenchmarkSetSuite(b *testing.B, flushPer bool) {
 			for i := 0; i < b.N; i++ {
 				r := rander{rand.New(rand.NewSource(int64(i)))}
 				blockstore := newMockBlocks()
-				n := NewNode(cbor.NewCborStore(blockstore), UseTreeBitWidth(t.bitwidth))
+				n, err := NewNode(cbor.NewCborStore(blockstore), UseTreeBitWidth(t.bitwidth))
+				require.NoError(b, err)
 				// Initial fill:
 				for j := 0; j < t.kcount*1000; j++ {
-					if err := n.Set(context.Background(), r.randString(), r.randValue()); err != nil {
-						b.Fatal(err)
-					}
+					err := n.Set(context.Background(), r.randString(), r.randValue())
+					require.NoError(b, err)
 				}
-				if err := n.Flush(context.Background()); err != nil {
-					b.Fatal(err)
-				}
+				require.NoError(b, n.Flush(context.Background()))
+
 				initalBlockstoreSize := len(blockstore.data)
 				b.ResetTimer()
 				blockstore.stats = blockstoreStats{}
 				// Additional inserts:
 				b.ReportAllocs()
 				for j := 0; j < 1000; j++ {
-					if err := n.Set(context.Background(), r.randString(), r.randValue()); err != nil {
-						b.Fatal(err)
-					}
+					err := n.Set(context.Background(), r.randString(), r.randValue())
+					require.NoError(b, err)
 					if flushPer {
-						if err := n.Flush(context.Background()); err != nil {
-							b.Fatal(err)
-						}
+						require.NoError(b, n.Flush(context.Background()))
 					}
 				}
 				if !flushPer {
-					if err := n.Flush(context.Background()); err != nil {
-						b.Fatal(err)
-					}
+					require.NoError(b, n.Flush(context.Background()))
 				}
 				b.StopTimer()
 				if i < 3 {
@@ -231,25 +223,20 @@ func doBenchmarkEntriesCount(num int, bitWidth int) func(b *testing.B) {
 	return func(b *testing.B) {
 		blockstore := newMockBlocks()
 		cs := cbor.NewCborStore(blockstore)
-		n := NewNode(cs, UseTreeBitWidth(bitWidth))
+		n, err := NewNode(cs, UseTreeBitWidth(bitWidth))
+		require.NoError(b, err)
 
 		var keys []string
 		for i := 0; i < num; i++ {
 			k := r.randString()
-			if err := n.Set(context.TODO(), k, r.randValue()); err != nil {
-				b.Fatal(err)
-			}
+			err := n.Set(context.TODO(), k, r.randValue())
+			require.NoError(b, err)
 			keys = append(keys, k)
 		}
-
-		if err := n.Flush(context.TODO()); err != nil {
-			b.Fatal(err)
-		}
+		require.NoError(b, n.Flush(context.TODO()))
 
 		c, err := cs.Put(context.TODO(), n)
-		if err != nil {
-			b.Fatal(err)
-		}
+		require.NoError(b, err)
 
 		runtime.GC()
 		blockstore.stats = blockstoreStats{}
@@ -258,9 +245,7 @@ func doBenchmarkEntriesCount(num int, bitWidth int) func(b *testing.B) {
 
 		for i := 0; i < b.N; i++ {
 			nd, err := LoadNode(context.TODO(), cs, c, UseTreeBitWidth(bitWidth))
-			if err != nil {
-				b.Fatal(err)
-			}
+			require.NoError(b, err)
 
 			found, err := nd.Find(context.TODO(), keys[i%num], nil)
 			require.NoError(b, err)
