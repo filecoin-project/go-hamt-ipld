@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	cbor "github.com/ipfs/go-ipld-cbor"
+	"github.com/stretchr/testify/require"
 	cbg "github.com/whyrusleeping/cbor-gen"
 )
 
@@ -261,9 +262,9 @@ func doBenchmarkEntriesCount(num int, bitWidth int) func(b *testing.B) {
 				b.Fatal(err)
 			}
 
-			if err = nd.Find(context.TODO(), keys[i%num], nil); err != nil {
-				b.Fatal(err)
-			}
+			found, err := nd.Find(context.TODO(), keys[i%num], nil)
+			require.NoError(b, err)
+			require.True(b, found, "key not found")
 		}
 		b.ReportMetric(float64(blockstore.stats.evtcntGet)/float64(b.N), "getEvts/find")
 		b.ReportMetric(float64(blockstore.stats.evtcntPut)/float64(b.N), "putEvts/find") // surely this is zero, but for completeness.

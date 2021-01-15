@@ -41,10 +41,6 @@ const (
 //-----------------------------------------------------------------------------
 // Errors
 
-// ErrNotFound is returned when a Find operation fails to locate the specified
-// key in the HAMT
-var ErrNotFound = fmt.Errorf("not found")
-
 // ErrMaxDepth is returned when the HAMT spans further than the hash function
 // is capable of representing. This can occur when sufficient hash collisions
 // (e.g. from a weak hash function and attacker-provided keys) extend leaf
@@ -231,37 +227,42 @@ func NewNode(cs cbor.IpldStore, options ...Option) *Node {
 }
 
 // Find navigates through the HAMT structure to where key `k` should exist. If
-// the key is not found, an ErrNotFound error is returned. If the key is found
-// and the `out` parameter has an UnmarshalCBOR(Reader) method, the decoded
-// value is returned. If found and the `out` parameter is `nil`, then `nil`
-// will be returned (can be used to determine if a key exists where you don't
-// need the value, e.g. using the HAMT as a Set).
+// the key is not found, returns false. If the key is found, returns true, and
+// if the `out` parameter has an UnmarshalCBOR(Reader) method, the
+// value is decoded into it. The `out` parameter may be nil to test for existence
+// without decoding.
 //
 // Depending on the size of the HAMT, this method may load a large number of
 // child nodes via the HAMT's IpldStore.
-func (n *Node) Find(ctx context.Context, k string, out cbg.CBORUnmarshaler) error {
-	return n.getValue(ctx, &hashBits{b: n.hash([]byte(k))}, k, func(kv *KV) error {
-		// Test testing if the key exists.
+func (n *Node) Find(ctx context.Context, k string, out cbg.CBORUnmarshaler) (bool, error) {
+	var found bool
+	err := n.getValue(ctx, &hashBits{b: n.hash([]byte(k))}, k, func(kv *KV) error {
+		found = true
 		// Note that an interface pointer-to-nil is not == nil and, if received here, will panic.
 		if out == nil {
 			return nil
 		}
 		return out.UnmarshalCBOR(bytes.NewReader(kv.Value.Raw))
 	})
+	return found, err
 }
 
 // FindRaw performs the same function as Find, but returns the raw bytes found
 // at the key's location (which may or may not be DAG-CBOR, see also SetRaw).
-func (n *Node) FindRaw(ctx context.Context, k string) ([]byte, error) {
-	var ret []byte
+func (n *Node) FindRaw(ctx context.Context, k string) (bool, []byte, error) {
+	var found bool
+	var value []byte
 	err := n.getValue(ctx, &hashBits{b: n.hash([]byte(k))}, k, func(kv *KV) error {
-		ret = kv.Value.Raw
+		found = true
+		value = kv.Value.Raw
 		return nil
 	})
-	return ret, err
+	return found, value, err
 }
 
-// Delete removes an entry entirely from the HAMT structure.
+// Delete removes an entry from the HAMT structure.
+//
+// Returns true if the key was found and deleted, false if the key was absent.
 //
 // This operation will result in the modification of _at least_ one IPLD block
 // via the IpldStore. Depending on the contents of the leaf node, this
@@ -269,15 +270,16 @@ func (n *Node) FindRaw(ctx context.Context, k string) ([]byte, error) {
 // canonical form for the remaining data. For an insufficiently random
 // collection of keys at the relevant leaf nodes such a collapse may cascade to
 // further nodes.
-func (n *Node) Delete(ctx context.Context, k string) error {
+func (n *Node) Delete(ctx context.Context, k string) (bool, error) {
 	kb := []byte(k)
-	_, err := n.modifyValue(ctx, &hashBits{b: n.hash(kb)}, kb, nil, OVERWRITE)
-	return err
+	modified, err := n.modifyValue(ctx, &hashBits{b: n.hash(kb)}, kb, nil, OVERWRITE)
+	return modified == MODIFIED, err
 }
 
 // handle the two Find operations in a recursive manner, where each node in the
-// HAMT we traverse we call this function again with the same parameters. Note
-// that `hv` contains state and `hv.Next()` is not idempotent. Each call
+// HAMT we traverse we call this function again with the same parameters.
+// Invokes the callback if and only if the key is found.
+// Note that `hv` contains state and `hv.Next()` is not idempotent. Each call
 // increments a counter for the number of bits consumed.
 func (n *Node) getValue(ctx context.Context, hv *hashBits, k string, cb func(*KV) error) error {
 	// hv.Next chomps off `bitWidth` bits from the hash digest. As we proceed
@@ -292,7 +294,7 @@ func (n *Node) getValue(ctx context.Context, hv *hashBits, k string, cb func(*KV
 	// if the element expected at this node isn't here then we can be sure it
 	// doesn't exist in the HAMT.
 	if n.Bitfield.Bit(idx) == 0 {
-		return ErrNotFound
+		return nil
 	}
 
 	// otherwise, the value is either local or in a child
@@ -321,7 +323,7 @@ func (n *Node) getValue(ctx context.Context, hv *hashBits, k string, cb func(*KV
 		}
 	}
 
-	return ErrNotFound
+	return nil
 }
 
 // load a HAMT node from the IpldStore and pass on the (assumed) parameters
@@ -646,6 +648,9 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.D
 	// doesn't exist in the HAMT already and can insert it at the appropriate
 	// position.
 	if n.Bitfield.Bit(idx) != 1 {
+		if v == nil { // Delete absent key
+			return UNMODIFIED, nil
+		}
 		return MODIFIED, n.insertKV(idx, k, v)
 	}
 
@@ -707,7 +712,7 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.D
 				return MODIFIED, nil
 			}
 		}
-		return UNMODIFIED, ErrNotFound
+		return UNMODIFIED, nil // Delete absent key
 	}
 
 	// modify existing, check if key already exists
@@ -759,10 +764,6 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.D
 // This will involve modifying the bitfield for that index and inserting a new
 // bucket containing the single key/value pair at that position.
 func (n *Node) insertKV(idx int, k []byte, v *cbg.Deferred) error {
-	if v == nil {
-		return ErrNotFound
-	}
-
 	i := n.indexForBitPos(idx)
 	n.Bitfield.SetBit(n.Bitfield, idx, 1)
 
