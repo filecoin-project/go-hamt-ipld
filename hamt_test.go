@@ -1245,3 +1245,126 @@ func TestCleanChildOrdering(t *testing.T) {
 	h, err = LoadNode(ctx, cs, root, hamtOptions...)
 	assert.NoError(t, err)
 }
+
+
+func TestPutOrderIndependent(t *testing.T) {
+	makeKey := func(i uint64) string {
+		buf := make([]byte, 10)
+		n := binary.PutUvarint(buf, i)
+		return string(buf[:n])
+	}
+	dummyValue := cbg.CborInt(42)
+
+	ctx := context.Background()
+	cs := cbor.NewCborStore(newMockBlocks())
+	hamtOptions := []Option{
+		UseTreeBitWidth(5),
+		UseHashFunction(func(input []byte) []byte {
+			res := sha256.Sum256(input)
+			return res[:]
+		}),
+	}
+
+	h, err := NewNode(cs, hamtOptions...)
+	require.NoError(t, err)
+
+	nKeys := 32*32*2
+
+	for i := uint64(1); i < uint64(nKeys); i++ {
+		err := h.Set(ctx, makeKey(i), &dummyValue)
+		require.NoError(t, err)
+	}
+
+	// Shouldn't matter but repeating original case exactly
+	require.NoError(t, h.Flush(ctx))
+	c, err := cs.Put(ctx, h)
+	require.NoError(t, err)
+
+	vals := make([]int, 100)
+
+	for i := range vals {
+		vals[i] = rand.Intn(nKeys)
+	}
+
+	newDummyValue := cbg.CborInt(43)
+
+	res := map[cid.Cid]struct{}{}
+	for i := 0; i < 20; i++ {
+		h, err = LoadNode(ctx, cs, c, hamtOptions...)
+		require.NoError(t, err)
+		rand.Shuffle(len(vals), func(i, j int) {
+			vals[i], vals[j] = vals[j], vals[i]
+		})
+
+		for _, k := range vals {
+			h.Set(ctx, makeKey(uint64(k)), &newDummyValue)
+		}
+
+		require.NoError(t, h.Flush(ctx))
+		c, err := cs.Put(ctx, h)
+		require.NoError(t, err)
+		res[c] = struct{}{}
+	}
+
+	require.Len(t, res, 1)
+}
+
+func TestDeleteOrderIndependent(t *testing.T) {
+	makeKey := func(i uint64) string {
+		buf := make([]byte, 10)
+		n := binary.PutUvarint(buf, i)
+		return string(buf[:n])
+	}
+	dummyValue := cbg.CborInt(42)
+
+	ctx := context.Background()
+	cs := cbor.NewCborStore(newMockBlocks())
+	hamtOptions := []Option{
+		UseTreeBitWidth(5),
+		UseHashFunction(func(input []byte) []byte {
+			res := sha256.Sum256(input)
+			return res[:]
+		}),
+	}
+
+	h, err := NewNode(cs, hamtOptions...)
+	require.NoError(t, err)
+
+	nKeys := 32*32*2
+
+	for i := uint64(1); i < uint64(nKeys); i++ {
+		err := h.Set(ctx, makeKey(i), &dummyValue)
+		require.NoError(t, err)
+	}
+
+	// Shouldn't matter but repeating original case exactly
+	require.NoError(t, h.Flush(ctx))
+	c, err := cs.Put(ctx, h)
+	require.NoError(t, err)
+
+	vals := make([]int, 100)
+
+	for i := range vals {
+		vals[i] = rand.Intn(nKeys)
+	}
+
+	res := map[cid.Cid]struct{}{}
+	for i := 0; i < 20; i++ {
+		h, err = LoadNode(ctx, cs, c, hamtOptions...)
+		require.NoError(t, err)
+		rand.Shuffle(len(vals), func(i, j int) {
+			vals[i], vals[j] = vals[j], vals[i]
+		})
+
+		for _, k := range vals {
+			h.Delete(ctx, makeKey(uint64(k)))
+		}
+
+		require.NoError(t, h.Flush(ctx))
+		c, err := cs.Put(ctx, h)
+		require.NoError(t, err)
+		res[c] = struct{}{}
+	}
+
+	require.Len(t, res, 1)
+}
