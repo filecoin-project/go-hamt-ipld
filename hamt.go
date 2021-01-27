@@ -646,8 +646,10 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.D
 			return UNMODIFIED, err
 		}
 
-		child.dirty = bool(modified)
-
+		if !child.dirty {
+			child.dirty = bool(modified)
+		}
+		
 		// CHAMP optimization, ensure the HAMT retains its canonical form for the
 		// current data it contains. This may involve collapsing child nodes if
 		// they no longer contain enough elements to justify their stand-alone
