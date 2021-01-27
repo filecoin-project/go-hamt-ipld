@@ -348,7 +348,6 @@ func loadNode(
 	out.bitWidth = bitWidth
 	out.hash = hashFunction
 
-
 	// Validation
 
 	// too many elements in the data array for the configured bitWidth?
@@ -649,7 +648,7 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.D
 		if !child.dirty {
 			child.dirty = bool(modified)
 		}
-		
+
 		// CHAMP optimization, ensure the HAMT retains its canonical form for the
 		// current data it contains. This may involve collapsing child nodes if
 		// they no longer contain enough elements to justify their stand-alone

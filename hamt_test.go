@@ -958,12 +958,12 @@ func TestMalformedHamt(t *testing.T) {
 		en := []byte{}
 		for _, kv := range kvs {
 			en = bcat(en, bcat(b(0x80+2), // array(2)
-				bcat(b(0x40+1), b(kv.key)), // bytes(1) "\x??"
+				bcat(b(0x40+1), b(kv.key)),    // bytes(1) "\x??"
 				bcat(b(0x40+1), b(kv.value)))) // bytes(1) "\x??"
 		}
 		return bcat(
 			b(0x80+byte(len(kvs))), // array(?)
-			en) // bucket contents
+			en)                     // bucket contents
 	}
 
 	// most minimal HAMT node with one k/v entry, sanity check we can load this
@@ -981,15 +981,15 @@ func TestMalformedHamt(t *testing.T) {
 		bcat(b(0x80+2), // array(2)
 			bcat(b(0x40+2), []byte{0x03, 0xff}), // bytes(1) "\x3ff" (bitmap with lower 10 bits set)
 			bcat(b(0x80+10), // array(10)
-				bucketCbor(kv{0x00, 0xf0}), // 0x00=0xf0
-				bucketCbor(kv{0x01, 0xf1}), // 0x01=0xf1
-				bucketCbor(kv{0x02, 0xf2}), // 0x02=0xf2
-				bucketCbor(kv{0x03, 0xf3}), // 0x03=0xf3
-				bucketCbor(kv{0x04, 0xf4}), // 0x04=0xf4
-				bucketCbor(kv{0x05, 0xf5}), // 0x05=0xf5
-				bucketCbor(kv{0x06, 0xf6}), // 0x06=0xf6
-				bucketCbor(kv{0x07, 0xf7}), // 0x07=0xf7
-				bucketCbor(kv{0x08, 0xf8}), // 0x08=0xf8
+				bucketCbor(kv{0x00, 0xf0}),   // 0x00=0xf0
+				bucketCbor(kv{0x01, 0xf1}),   // 0x01=0xf1
+				bucketCbor(kv{0x02, 0xf2}),   // 0x02=0xf2
+				bucketCbor(kv{0x03, 0xf3}),   // 0x03=0xf3
+				bucketCbor(kv{0x04, 0xf4}),   // 0x04=0xf4
+				bucketCbor(kv{0x05, 0xf5}),   // 0x05=0xf5
+				bucketCbor(kv{0x06, 0xf6}),   // 0x06=0xf6
+				bucketCbor(kv{0x07, 0xf7}),   // 0x07=0xf7
+				bucketCbor(kv{0x08, 0xf8}),   // 0x08=0xf8
 				bucketCbor(kv{0x09, 0xf9})))) // 0x09=0xf9
 	// sanity check
 	for i := 0; i < 10; i++ {
@@ -1011,9 +1011,9 @@ func TestMalformedHamt(t *testing.T) {
 		bcat(b(0x80+2), // array(2)
 			bcat(b(0x40+1), b(0x03)), // bytes(1) "\x03" (bitmap)
 			bcat(b(0x80+1), // array(1)
-				bucketCbor(kv{0x00, 0xff}), // 0x00=0xff
-				bucketCbor(kv{0x00, 0xff}), // 0x00=0xff
-				bucketCbor(kv{0x00, 0xff}), // 0x00=0xff
+				bucketCbor(kv{0x00, 0xff}),   // 0x00=0xff
+				bucketCbor(kv{0x00, 0xff}),   // 0x00=0xff
+				bucketCbor(kv{0x00, 0xff}),   // 0x00=0xff
 				bucketCbor(kv{0x00, 0xff})))) // 0x00=0xff
 	n, err = LoadNode(ctx, cs, bcid, UseTreeBitWidth(3), UseHashFunction(identityHash))
 	if err != ErrMalformedHamt || n != nil {
@@ -1105,14 +1105,14 @@ func TestMalformedHamt(t *testing.T) {
 	store(
 		bcat(b(0x80+2), // array(2)
 			bcat(b(0x40+1), b(0x00)), // bytes(1) "\x00" (bitmap)
-			bcat(b(0x80+0)))) // array(0)
+			bcat(b(0x80+0))))         // array(0)
 	load()
 
 	// make a child empty block and point to it in a root
 	blocks.data[bccid] = block.NewBlock(
 		bcat(b(0x80+2), // array(2)
 			bcat(b(0x40+1), b(0x00)), // bytes(1) "\x00" (bitmap)
-			bcat(b(0x80+0)))) // array(0)
+			bcat(b(0x80+0))))         // array(0)
 	// root block pointing to the child, child block can't be empty
 	store(
 		bcat(b(0x80+2), // array(2)
@@ -1162,7 +1162,7 @@ func TestMalformedHamt(t *testing.T) {
 				bcat(b(0x80+1), // array(1)
 					bcat(b(0x80+2), // array(2)
 						bcat(b(0x40+2), []byte{0x00, 0x01}), // bytes(2) "\x0001"
-						bcat(b(0x40+1), b(0xff)))), // bytes(1) "\xff"
+						bcat(b(0x40+1), b(0xff)))),          // bytes(1) "\xff"
 				bcat(b(0xd8), b(0x2a), // tag(42)
 					b(0x58), b(0x27), // bytes(39)
 					ccidBytes)))) // cid
@@ -1246,7 +1246,6 @@ func TestCleanChildOrdering(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-
 func TestPutOrderIndependent(t *testing.T) {
 	makeKey := func(i uint64) string {
 		buf := make([]byte, 10)
@@ -1268,7 +1267,7 @@ func TestPutOrderIndependent(t *testing.T) {
 	h, err := NewNode(cs, hamtOptions...)
 	require.NoError(t, err)
 
-	nKeys := 32*32*2
+	nKeys := 32 * 32 * 2
 
 	for i := uint64(1); i < uint64(nKeys); i++ {
 		err := h.Set(ctx, makeKey(i), &dummyValue)
@@ -1330,7 +1329,7 @@ func TestDeleteOrderIndependent(t *testing.T) {
 	h, err := NewNode(cs, hamtOptions...)
 	require.NoError(t, err)
 
-	nKeys := 32*32*2
+	nKeys := 32 * 32 * 2
 
 	for i := uint64(1); i < uint64(nKeys); i++ {
 		err := h.Set(ctx, makeKey(i), &dummyValue)
