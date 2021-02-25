@@ -22,7 +22,7 @@ func (n *Node) AsString() (string, error) {
 	return "", ErrNotFound
 }
 
-func (n *Node) AsInt() (int, error) {
+func (n *Node) AsInt() (int64, error) {
 	return 0, ErrNotFound
 }
 
@@ -42,8 +42,8 @@ func (n *Node) IsNull() bool {
 	return n.Bitfield == nil
 }
 
-func (n *Node) Length() int {
-	l := 0
+func (n *Node) Length() int64 {
+	l := int64(0)
 	for _, p := range n.Pointers {
 		if p.Link.Defined() {
 			c, err := p.loadChild(context.Background(), n.store, n.bitWidth, n.hash, n.proto)
@@ -52,14 +52,14 @@ func (n *Node) Length() int {
 			}
 			l += c.Length()
 		} else {
-			l += len(p.KVs)
+			l += int64(len(p.KVs))
 		}
 	}
-	return l
+	return int64(l)
 }
 
-func (n *Node) ReprKind() ipld.ReprKind {
-	return ipld.ReprKind_Map
+func (n *Node) Kind() ipld.Kind {
+	return ipld.Kind_Map
 }
 
 // LookupByString looks up a child object in this node and returns it.
@@ -80,13 +80,13 @@ func (n *Node) LookupByString(key string) (ipld.Node, error) {
 }
 
 func (n *Node) LookupByNode(key ipld.Node) (ipld.Node, error) {
-	if key.ReprKind() == ipld.ReprKind_String {
+	if key.Kind() == ipld.Kind_String {
 		s, e := key.AsString()
 		if e != nil {
 			return nil, e
 		}
 		return n.LookupByString(s)
-	} else if key.ReprKind() == ipld.ReprKind_Bytes {
+	} else if key.Kind() == ipld.Kind_Bytes {
 		b, e := key.AsBytes()
 		if e != nil {
 			return nil, e
@@ -96,7 +96,7 @@ func (n *Node) LookupByNode(key ipld.Node) (ipld.Node, error) {
 	return nil, ipld.ErrInvalidKey{}
 }
 
-func (n *Node) LookupByIndex(idx int) (ipld.Node, error) {
+func (n *Node) LookupByIndex(idx int64) (ipld.Node, error) {
 	return nil, ErrNotFound
 }
 
@@ -223,7 +223,7 @@ func (h *hamtBuilder) Reset() {
 	h.n = nil
 }
 
-func (h *hamtBuilder) BeginMap(sizeHint int) (ipld.MapAssembler, error) {
+func (h *hamtBuilder) BeginMap(sizeHint int64) (ipld.MapAssembler, error) {
 	return h, nil
 }
 
@@ -249,7 +249,7 @@ func (h *hamtBuilder) ValuePrototype(k string) ipld.NodePrototype {
 	return h.proto.v
 }
 
-func (h *hamtBuilder) BeginList(sizeHint int) (ipld.ListAssembler, error) {
+func (h *hamtBuilder) BeginList(sizeHint int64) (ipld.ListAssembler, error) {
 	return nil, ErrNotFound
 }
 func (h *hamtBuilder) AssignNull() error {
@@ -258,7 +258,7 @@ func (h *hamtBuilder) AssignNull() error {
 func (h *hamtBuilder) AssignBool(bool) error {
 	return ErrNotFound
 }
-func (h *hamtBuilder) AssignInt(int) error {
+func (h *hamtBuilder) AssignInt(int64) error {
 	return ErrNotFound
 }
 func (h *hamtBuilder) AssignFloat(float64) error {
