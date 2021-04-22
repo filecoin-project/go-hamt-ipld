@@ -126,6 +126,7 @@ func randValue() *CborByteArray {
 	return &buf
 }
 
+//lint:ignore U1000 used for debugging
 func dotGraph(n *Node) {
 	fmt.Println("digraph foo {")
 	name := 0
@@ -920,14 +921,18 @@ func TestMalformedHamt(t *testing.T) {
 	blocks := newMockBlocks()
 	cs := cbor.NewCborStore(blocks)
 	bcid, err := cid.Decode("bafy2bzaceab7vkg5c3zti7ebqensb3onksjkc4wwktkiledkezgvnbvzs4cti")
+	require.NoError(t, err)
 	bccid, err := cid.Decode("bafy2bzaceab7vkg5c3zti7ebqensb3onksjkc4wwktkiledkezgvnbvzs4cqa")
 	require.NoError(t, err)
 	// just the bcid bytes, without the tag
-	cidBytes, _ := hex.DecodeString("000171A0E4022003FAA8DD16F3347C81811B20EDCD5492A172D654D485906A264D5686B9970534")
+	cidBytes, err := hex.DecodeString("000171A0E4022003FAA8DD16F3347C81811B20EDCD5492A172D654D485906A264D5686B9970534")
+	require.NoError(t, err)
 	// just the bccid bytes, without the tag, prefixed with 0x00 for dag-cbor
-	ccidBytes, _ := hex.DecodeString("000171a0e4022003faa8dd16f3347c81811b20edcd5492a172d654d485906a264d5686b9970500")
+	ccidBytes, err := hex.DecodeString("000171a0e4022003faa8dd16f3347c81811b20edcd5492a172d654d485906a264d5686b9970500")
+	require.NoError(t, err)
 	// badCidBytes is cidBytes but with dag-pb, prefixed with 0x00 for dag-cbor
-	badCidBytes, _ := hex.DecodeString("000170a0e4022003faa8dd16f3347c81811b20edcd5492a172d654d485906a264d5686b9970534")
+	badCidBytes, err := hex.DecodeString("000170a0e4022003faa8dd16f3347c81811b20edcd5492a172d654d485906a264d5686b9970534")
+	require.NoError(t, err)
 
 	// util closures
 	store := func(blob []byte) {
@@ -1169,7 +1174,7 @@ func TestMalformedHamt(t *testing.T) {
 
 	_, vg, err = load().FindRaw(ctx, string([]byte{0x00, 0x01}))
 	// without validation of the child block, this would return not found
-	if err != nil && bytes.Compare(vg, []byte{0x40 + 2, 0x00, 0x01}) != 0 {
+	if err != nil && !bytes.Equal(vg, []byte{0x40 + 2, 0x00, 0x01}) {
 		t.Fatal("Should have returned found entry")
 	}
 }
@@ -1239,10 +1244,10 @@ func TestCleanChildOrdering(t *testing.T) {
 	err = h.Flush(ctx)
 	assert.NoError(t, err)
 	root, err = cs.Put(ctx, h)
+	require.NoError(t, err)
 
 	// Reload without error
-	require.NoError(t, err)
-	h, err = LoadNode(ctx, cs, root, hamtOptions...)
+	_, err = LoadNode(ctx, cs, root, hamtOptions...)
 	assert.NoError(t, err)
 }
 

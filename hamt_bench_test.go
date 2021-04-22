@@ -13,6 +13,8 @@ import (
 	cbg "github.com/whyrusleeping/cbor-gen"
 )
 
+var debugHistogram = false
+
 type rander struct {
 	r *rand.Rand
 }
@@ -126,8 +128,8 @@ func BenchmarkFill(b *testing.B) {
 				require.NoError(b, err)
 
 				b.StopTimer()
-				if i < 3 {
-					//b.Logf("block size histogram: %v\n", blockstore.getBlockSizesHistogram())
+				if debugHistogram && i < 3 {
+					b.Logf("block size histogram: %v\n", blockstore.getBlockSizesHistogram())
 				}
 				if blockstore.stats.evtcntPutDup > 0 {
 					b.Logf("on round N=%d: blockstore stats: %#v\n", b.N, blockstore.stats) // note: must refer to this before doing `n.checkSize`; that function has many effects.
@@ -196,8 +198,8 @@ func doBenchmarkSetSuite(b *testing.B, flushPer bool) {
 					require.NoError(b, n.Flush(context.Background()))
 				}
 				b.StopTimer()
-				if i < 3 {
-					// b.Logf("block size histogram: %v\n", blockstore.getBlockSizesHistogram())
+				if debugHistogram && i < 3 {
+					b.Logf("block size histogram: %v\n", blockstore.getBlockSizesHistogram())
 				}
 				if blockstore.stats.evtcntPutDup > 0 {
 					b.Logf("on round N=%d: blockstore stats: %#v\n", b.N, blockstore.stats)

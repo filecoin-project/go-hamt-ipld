@@ -764,7 +764,7 @@ func (n *Node) rmPointer(i byte, idx int) error {
 // Load a Pointer from the specified index of the Pointers array. The element
 // should exist in a properly formed HAMT.
 func (n *Node) getPointer(i byte) *Pointer {
-	if int(i) >= len(n.Pointers) || i < 0 {
+	if int(i) >= len(n.Pointers) {
 		// TODO(rvagg): I think this should be an error, there's an assumption in
 		// calling code that it's not null and a proper hash chomp shouldn't result
 		// in anything out of bounds
