@@ -308,6 +308,26 @@ func (p *Pointer) loadChild(ctx context.Context, ns cbor.IpldStore, bitWidth int
 	return out, nil
 }
 
+// load a HAMT node from the IpldStore passing on the (assumed) parameters
+// that are not stored with the node and return all KVs of the child and its children.
+func (p *Pointer) loadChildKVs(ctx context.Context, ns cbor.IpldStore, bitWidth int, hash HashFunc) ([]*KV, error) {
+	child, err := p.loadChild(ctx, ns, bitWidth, hash)
+	if err != nil {
+		return nil, err
+	}
+	var out []*KV
+	if err := child.ForEach(ctx, func(k string, val *cbg.Deferred) error {
+		out = append(out, &KV{
+			Key:   []byte(k),
+			Value: val,
+		})
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // LoadNode loads a HAMT Node from the IpldStore and configures it according
 // to any specified Option parameters. Where the parameters of this HAMT vary
 // from the defaults (hash function and bitWidth), those variations _must_ be
