@@ -4,16 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"math/big"
 
 	"github.com/ipfs/go-cid"
 	cbor "github.com/ipfs/go-ipld-cbor"
-	logging "github.com/ipfs/go-log/v2"
 	cbg "github.com/whyrusleeping/cbor-gen"
 	"golang.org/x/xerrors"
 )
-
-var log = logging.Logger("diff")
 
 // ChangeType denotes type of change in Change
 type ChangeType int
@@ -41,6 +37,10 @@ func (ch Change) String() string {
 
 // Diff returns a set of changes that transform node 'prev' into node 'cur'. opts are applied to both prev and cur.
 func Diff(ctx context.Context, prevBs, curBs cbor.IpldStore, prev, cur cid.Cid, opts ...Option) ([]*Change, error) {
+	if prev.Equals(cur) {
+		return nil, nil
+	}
+
 	prevHamt, err := LoadNode(ctx, prevBs, prev, opts...)
 	if err != nil {
 		return nil, err
@@ -58,20 +58,11 @@ func Diff(ctx context.Context, prevBs, curBs cbor.IpldStore, prev, cur cid.Cid, 
 }
 
 func diffNode(ctx context.Context, pre, cur *Node, depth int) ([]*Change, error) {
-	if pre == cur {
-		return nil, nil
-	}
-
-	intersect := big.NewInt(0).And(cur.Bitfield, pre.Bitfield)
-
 	// which Bitfield contains the most bits. We will start a loop from this index, calling Bitfield.Bit(idx)
 	// on an out of range index will return zero.
-	bp := intersect.BitLen()
-	if pre.Bitfield.BitLen() > cur.Bitfield.BitLen() {
+	bp := cur.Bitfield.BitLen()
+	if pre.Bitfield.BitLen() > bp {
 		bp = pre.Bitfield.BitLen()
-	}
-	if pre.Bitfield.BitLen() < cur.Bitfield.BitLen() {
-		bp = cur.Bitfield.BitLen()
 	}
 
 	// the changes between cur and prev
@@ -79,9 +70,10 @@ func diffNode(ctx context.Context, pre, cur *Node, depth int) ([]*Change, error)
 
 	// loop over each bit in the bitfields
 	for idx := bp; idx >= 0; idx-- {
-		// intersection across all fields means there _may_ exist a matching key in the pointers or
-		// a child of a pointer.
-		if intersect.Bit(idx) == 1 && pre.Bitfield.Bit(idx) == 1 && cur.Bitfield.Bit(idx) == 1 {
+		preBit := pre.Bitfield.Bit(idx)
+		curBit := cur.Bitfield.Bit(idx)
+
+		if preBit == 1 && curBit == 1 {
 			// index for pre and cur will be unique to each, calculate it here.
 			prePointer := pre.getPointer(byte(pre.indexForBitPos(idx)))
 			curPointer := cur.getPointer(byte(cur.indexForBitPos(idx)))
@@ -127,8 +119,7 @@ func diffNode(ctx context.Context, pre, cur *Node, depth int) ([]*Change, error)
 			if !prePointer.isShard() && !curPointer.isShard() {
 				changes = append(changes, diffKVs(prePointer.KVs, curPointer.KVs, idx)...)
 			}
-
-		} else if pre.Bitfield.Bit(idx) == 1 && cur.Bitfield.Bit(idx) == 0 && intersect.Bit(idx) == 0 {
+		} else if preBit == 1 && curBit == 0 {
 			// there exists a value in previous not found in current - it was removed
 			pointer := pre.getPointer(byte(pre.indexForBitPos(idx)))
 
@@ -150,11 +141,9 @@ func diffNode(ctx context.Context, pre, cur *Node, depth int) ([]*Change, error)
 						Before: p.Value,
 						After:  nil,
 					})
-					log.Infow("Change", "idx", idx, "type", "remove", "key", string(p.Key))
 				}
 			}
-
-		} else if cur.Bitfield.Bit(idx) == 1 && pre.Bitfield.Bit(idx) == 0 && intersect.Bit(idx) == 0 {
+		} else if curBit == 1 && preBit == 0 {
 			// there exists a value in current not found in previous - it was added
 			pointer := cur.getPointer(byte(cur.indexForBitPos(idx)))
 
@@ -176,7 +165,6 @@ func diffNode(ctx context.Context, pre, cur *Node, depth int) ([]*Change, error)
 						Before: nil,
 						After:  p.Value,
 					})
-					log.Infow("Change", "idx", idx, "type", "add", "key", string(p.Key))
 				}
 			}
 		}
@@ -205,7 +193,6 @@ func diffKVs(pre, cur []*KV, idx int) []*Change {
 				Before: value,
 				After:  nil,
 			})
-			log.Infow("Change", "idx", idx, "type", "remove", "key", string(key))
 		}
 	}
 	// find added keys: keys in cur and not in pre
@@ -218,7 +205,6 @@ func diffKVs(pre, cur []*KV, idx int) []*Change {
 				Before: nil,
 				After:  curVal,
 			})
-			log.Infow("Change", "idx", idx, "type", "add", "key", string(key))
 		} else {
 			if !bytes.Equal(preVal.Raw, curVal.Raw) {
 				changes = append(changes, &Change{
@@ -227,7 +213,6 @@ func diffKVs(pre, cur []*KV, idx int) []*Change {
 					Before: preVal,
 					After:  curVal,
 				})
-				log.Infow("Change", "idx", idx, "type", "modify", "key", string(key))
 			}
 		}
 	}
@@ -243,7 +228,6 @@ func addAll(ctx context.Context, node *Node, idx int) ([]*Change, error) {
 			Before: nil,
 			After:  val,
 		})
-		log.Infow("Change", "idx", idx, "type", "add", "key", string(k))
 
 		return nil
 	}); err != nil {
@@ -261,7 +245,6 @@ func removeAll(ctx context.Context, node *Node, idx int) ([]*Change, error) {
 			Before: val,
 			After:  nil,
 		})
-		log.Infow("Change", "idx", idx, "type", "remove", "key", string(k))
 
 		return nil
 	}); err != nil {
