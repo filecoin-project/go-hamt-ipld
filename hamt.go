@@ -383,8 +383,9 @@ func loadNode(
 	for _, ch := range out.Pointers {
 		isLink := ch.isShard()
 		isBucket := ch.KVs != nil
-		if !((isLink && !isBucket) || (!isLink && isBucket)) {
+		if isLink == isBucket {
 			// Pointer#UnmarshalCBOR shouldn't allow this
+			// A node can only be one of link or bucket
 			return nil, ErrMalformedHamt
 		}
 		if isLink && ch.Link.Type() != cid.DagCBOR { // not dag-cbor
