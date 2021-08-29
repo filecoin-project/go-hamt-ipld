@@ -913,6 +913,34 @@ func TestSetNilValues(t *testing.T) {
 	}
 }
 
+func TestPutRaw(t *testing.T) {
+	ctx := context.Background()
+	blocks := newMockBlocks()
+	cs := cbor.NewCborStore(blocks)
+	n, err := NewNode(cs)
+	require.NoError(t, err)
+
+	expect := []byte("value")
+	err = n.SetRaw(ctx, "key", expect)
+	require.NoError(t, err)
+
+	_, got, err := n.FindRaw(ctx, "key")
+	require.NoError(t, err)
+	require.Equal(t, expect, got)
+
+	err = n.Flush(ctx)
+	require.NoError(t, err)
+	id, err := cs.Put(ctx, n)
+	require.NoError(t, err)
+
+	n, err = LoadNode(ctx, cs, id)
+	require.NoError(t, err)
+
+	_, got, err = n.FindRaw(ctx, "key")
+	require.NoError(t, err)
+	require.Equal(t, expect, got)
+}
+
 // Some tests that use manually constructed (and very basic) CBOR forms of
 // nodes to test whether the implementation will reject malformed encoded nodes
 // on load.
