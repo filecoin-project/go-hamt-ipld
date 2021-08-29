@@ -457,7 +457,22 @@ func (n *Node) checkSize(ctx context.Context) (uint64, error) {
 	return totsize, nil
 }
 
-// Flush has two effectis, it (partially!) persists data and resets dirty flag
+// Write is a convenience method that calls flush and writes the node to it's
+// internal store, returning the CID of the stored node. It is equivelant to:
+//   n.Flush
+//   store.Put(ctx, n)
+// where store is equal to the store provided to the node when constructed.
+//
+// write should only be called on the root node of a HAMT
+func (n *Node) Write(ctx context.Context) (cid.Cid, error) {
+	if err := n.Flush(ctx); err != nil {
+		return cid.Undef, err
+	}
+
+	return n.store.Put(ctx, n)
+}
+
+// Flush has two effects, it (partially!) persists data and resets dirty flag
 //
 // Flush operates recursively, telling each "cache" child node to flush;
 // Put'ing that "cache" node to the store;
