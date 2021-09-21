@@ -213,7 +213,7 @@ func TestFillAndCollapse(t *testing.T) {
 		t.Fatal("Should be 1 node with 1 bucket")
 	}
 
-	baseCid, err := cs.Put(ctx, root)
+	baseCid, err := root.Write(ctx)
 	require.NoError(t, err)
 
 	// add a 4th colliding entry that forces a chain of new nodes to accommodate
@@ -240,7 +240,7 @@ func TestFillAndCollapse(t *testing.T) {
 		t.Fatal("Should be 1 node with 1 bucket")
 	}
 
-	c, err := cs.Put(ctx, root)
+	c, err := root.Write(ctx)
 	require.NoError(t, err)
 
 	if !c.Equals(baseCid) {
@@ -263,7 +263,7 @@ func TestFillAndCollapse(t *testing.T) {
 		t.Fatal("Should be 4 nodes with 2 buckets of 3")
 	}
 
-	midCid, err := cs.Put(ctx, root)
+	midCid, err := root.Write(ctx)
 	require.NoError(t, err)
 
 	// insert an overflow node that pushes the previous 4 into a separate node
@@ -312,7 +312,7 @@ func TestFillAndCollapse(t *testing.T) {
 		t.Fatal("Should be 4 nodes with 2 buckets of 3")
 	}
 
-	c, err = cs.Put(ctx, root)
+	c, err = root.Write(ctx)
 	require.NoError(t, err)
 
 	if !c.Equals(midCid) {
@@ -338,7 +338,7 @@ func TestFillAndCollapse(t *testing.T) {
 	}
 
 	// should have the same CID as original
-	c, err = cs.Put(ctx, root)
+	c, err = root.Write(ctx)
 	require.NoError(t, err)
 	if !c.Equals(baseCid) {
 		t.Fatal("CID mismatch on mutation")
@@ -1281,7 +1281,7 @@ func TestPutOrderIndependent(t *testing.T) {
 
 	// Shouldn't matter but repeating original case exactly
 	require.NoError(t, h.Flush(ctx))
-	c, err := cs.Put(ctx, h)
+	c, err := h.Write(ctx)
 	require.NoError(t, err)
 
 	vals := make([]int, 100)
@@ -1305,7 +1305,7 @@ func TestPutOrderIndependent(t *testing.T) {
 		}
 
 		require.NoError(t, h.Flush(ctx))
-		c, err := cs.Put(ctx, h)
+		c, err := h.Write(ctx)
 		require.NoError(t, err)
 		res[c] = struct{}{}
 	}
@@ -1343,7 +1343,7 @@ func TestDeleteOrderIndependent(t *testing.T) {
 
 	// Shouldn't matter but repeating original case exactly
 	require.NoError(t, h.Flush(ctx))
-	c, err := cs.Put(ctx, h)
+	c, err := h.Write(ctx)
 	require.NoError(t, err)
 
 	vals := make([]int, 100)
@@ -1365,7 +1365,7 @@ func TestDeleteOrderIndependent(t *testing.T) {
 		}
 
 		require.NoError(t, h.Flush(ctx))
-		c, err := cs.Put(ctx, h)
+		c, err := h.Write(ctx)
 		require.NoError(t, err)
 		res[c] = struct{}{}
 	}
