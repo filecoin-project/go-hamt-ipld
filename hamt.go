@@ -201,19 +201,6 @@ func (n *Node) Find(ctx context.Context, k string, out cbg.CBORUnmarshaler) (boo
 	return found, err
 }
 
-// FindRaw performs the same function as Find, but returns the raw bytes found
-// at the key's location (which may or may not be DAG-CBOR, see also SetRaw).
-func (n *Node) FindRaw(ctx context.Context, k string) (bool, []byte, error) {
-	var found bool
-	var value []byte
-	err := n.getValue(ctx, &hashBits{b: n.hash([]byte(k))}, k, func(kv *KV) error {
-		found = true
-		value = kv.Value.Raw
-		return nil
-	})
-	return found, value, err
-}
-
 // Delete removes an entry from the HAMT structure.
 //
 // Returns true if the key was found and deleted, false if the key was absent.
@@ -534,16 +521,6 @@ func (n *Node) SetIfAbsent(ctx context.Context, k string, v cbg.CBORMarshaler) (
 	keyBytes := []byte(k)
 	modified, err := n.modifyValue(ctx, &hashBits{b: n.hash(keyBytes)}, keyBytes, &d, NOVERWRITE)
 	return bool(modified), err
-}
-
-// SetRaw is similar to Set but sets key k in the HAMT to raw bytes without
-// performing a DAG-CBOR marshal. The bytes may or may not be encoded DAG-CBOR
-// (see also FindRaw for fetching raw form).
-func (n *Node) SetRaw(ctx context.Context, k string, raw []byte) error {
-	d := &cbg.Deferred{Raw: raw}
-	kb := []byte(k)
-	_, err := n.modifyValue(ctx, &hashBits{b: n.hash(kb)}, kb, d, OVERWRITE)
-	return err
 }
 
 // the number of links to child nodes this node contains
