@@ -182,7 +182,7 @@ func (n *Node) realize(key string, value []byte) (ipld.Node, ipld.Node, error) {
 	}
 
 	valueBuilder := mav.NewBuilder()
-	if err := dagcbor.Decoder(valueBuilder, bytes.NewBuffer(value)); err != nil {
+	if err := dagcbor.Decode(valueBuilder, bytes.NewBuffer(value)); err != nil {
 		return nil, nil, err
 	}
 	return keyBuilder.Build(), valueBuilder.Build(), nil
