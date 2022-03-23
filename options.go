@@ -1,6 +1,10 @@
 package hamt
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/ipld/go-ipld-prime"
+)
 
 const bucketSize = 3
 const defaultBitWidth = 8
@@ -8,6 +12,7 @@ const defaultBitWidth = 8
 type config struct {
 	bitWidth int
 	hashFn   HashFunc
+	proto    ipld.NodePrototype
 }
 
 func defaultConfig() *config {
@@ -55,6 +60,15 @@ func UseHashFunction(hash HashFunc) Option {
 			return fmt.Errorf("configured hash function was nil")
 		}
 		c.hashFn = hash
+		return nil
+	}
+}
+
+// WithProto creates a HAMT using a predefined prototype for values, when
+// used in an IPLD ADL context.
+func WithProto(p ipld.NodePrototype) Option {
+	return func(c *config) error {
+		c.proto = p
 		return nil
 	}
 }
