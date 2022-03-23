@@ -64,6 +64,9 @@ func (hb *hashBits) next(i int) int {
 
 func defaultHashFunction(val []byte) []byte {
 	h := murmur3.New64()
-	h.Write(val)
+	_, err := h.Write(val)
+	if err != nil {
+		panic(err) // Impossible
+	}
 	return h.Sum(nil)
 }

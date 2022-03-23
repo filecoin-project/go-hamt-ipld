@@ -11,21 +11,30 @@ import (
 	cbor "github.com/ipfs/go-ipld-cbor"
 	"github.com/ipld/go-ipld-prime"
 	cbg "github.com/whyrusleeping/cbor-gen"
-	xerrors "golang.org/x/xerrors"
 )
 
 //-----------------------------------------------------------------------------
-// Defaults
+// Boolean constants
+type overwrite bool
 
-const bucketSize = 3
-const defaultBitWidth = 8
+const (
+	// use OVERWRITE for modifyValue operations that overwrite existing values
+	OVERWRITE = overwrite(true)
+	// use NOVERWRITE for modifyValue operations that cannot overwrite existing values
+	NOVERWRITE = overwrite(false)
+)
+
+type modified bool
+
+const (
+	// return MODIFIED when a key value mapping is overwritten
+	MODIFIED = modified(true)
+	// return UNMODIFIED when a no key value mappings are overwritten
+	UNMODIFIED = modified(false)
+)
 
 //-----------------------------------------------------------------------------
 // Errors
-
-// ErrNotFound is returned when a Find operation fails to locate the specified
-// key in the HAMT
-var ErrNotFound = fmt.Errorf("not found")
 
 // ErrMaxDepth is returned when the HAMT spans further than the hash function
 // is capable of representing. This can occur when sufficient hash collisions
@@ -45,6 +54,9 @@ var ErrMalformedHamt = fmt.Errorf("HAMT node was malformed")
 //-----------------------------------------------------------------------------
 // Serialized data structures
 
+// HashFunc is a hashing function for values.
+type HashFunc func([]byte) []byte
+
 // Node is a single point in the HAMT, encoded as an IPLD tuple in DAG-CBOR of
 // shape:
 //   [bytes, [Pointer...]]
@@ -61,9 +73,6 @@ var ErrMalformedHamt = fmt.Errorf("HAMT node was malformed")
 // array. Indexes `[1]` and `[2]` are not present, but index `[3]` is at
 // the second position of our Pointers array.
 //
-// (Note: the `refmt` tags are ignored by cbor-gen which will generate an
-// array type rather than map.)
-//
 // The IPLD Schema representation of this data structure is as follows:
 //
 // 		type Node struct {
@@ -71,11 +80,11 @@ var ErrMalformedHamt = fmt.Errorf("HAMT node was malformed")
 // 			pointers [Pointer]
 // 		} representation tuple
 type Node struct {
-	Bitfield *big.Int   `refmt:"bf"`
-	Pointers []*Pointer `refmt:"p"`
+	Bitfield *big.Int
+	Pointers []*Pointer
 
 	bitWidth int
-	hash     func([]byte) []byte
+	hash     HashFunc
 
 	// for fetching and storing children
 	store cbor.IpldStore
@@ -84,10 +93,11 @@ type Node struct {
 
 // Pointer is an element in a HAMT node's Pointers array, encoded as an IPLD
 // tuple in DAG-CBOR of shape:
-//   {"0": CID} or {"1": [KV...]}
-// Where a map with a single key of "0" contains a Link, where a map with a
-// single key of "1" contains a KV bucket. The map may contain only one of
-// these two possible keys.
+//   CID or [KV...]
+// i.e. it is represented as a "kinded union" where a Link is a pointer to a
+// child node, while an array is a bucket of elements local to this node. A
+// Pointer must represent exactly one of of these two states and cannot be both
+// (or neither).
 //
 // There are between 1 and 2^bitWidth of these Pointers in any HAMT node.
 //
@@ -96,32 +106,44 @@ type Node struct {
 // the bucket is replaced with a link to a newly created HAMT node which will
 // contain the `bucketSize+1` elements in its own Pointers array.
 //
-// (Note: the `refmt` tags are ignored by cbor-gen which will generate an
-// array type rather than map.)
-//
 // The IPLD Schema representation of this data structure is as follows:
 //
 // 		type Pointer union {
-//			&Node "0"
-// 			Bucket "1"
-// 		} representation keyed
+//			&Node link
+// 			Bucket list
+// 		} representation kinded
 //
 //		type Bucket [KV]
 type Pointer struct {
-	KVs  []*KV   `refmt:"v,omitempty"`
-	Link cid.Cid `refmt:"l,omitempty"`
+	KVs  []*KV
+	Link cid.Cid
 
-	// cached node to avoid too many serialization operations
-	// TODO(rvagg): we should check that this is actually used optimally. Flush()
-	// performs a save of all of the cached nodes, but both Copy() and loadChild()
-	// will set them. In the case of loadChild() we're not expecting a mutation so
-	// a save is likely going to mean we incur unnecessary serialization when
-	// we've simply inspected the tree. Copy() will only set a cached form if
-	// it already exists on the source. It's unclear exactly what Flush() is good
-	// for in its current form. Users may also need an advisory about memory
-	// usage of large graphs since they don't have control over this outside of
-	// Flush().
+	// cache is a pointer to an in-memory Node, which may or may not be
+	// present, and corresponds to the Link field, which also may or may not
+	// be present.
+	//
+	// If present, the cached Node should be semantically substitutable with
+	// the Link field. It makes no sense for a cache Node to be present if KVs
+	// is set. Link might not be set, if cache is present and is describing
+	// data that has never yet been serialized and stored.
+	//
+	// `loadChild` will short circut to return this node if the pointer isn't
+	// nil;
+	// `loadChild` will also set this pointer when loading a node that wasn't
+	// yet present cached.
+	// `Flush` on a `Node` will iterate through each `Pointer` and `Put` its
+	// cache node if:
+	// 1. The Pointer's cache is not nil
+	// 2. The Pointer's dirty flag is true
+	// (and also recurse to `Flush` on that `Node`) -- in other words,
+	// `Flush` writes out the cached data
+	// `Flush` will assign `Link` in the process of `Put`'ing the 'cache' data.
+	// `Copy` will copy any cached nodes, Link fields and dirty flags.
+	//
+	// `Link` becomes defined on`Flush`
 	cache *Node
+	// dirty flag to indicate that the cached node needs to be flushed
+	dirty bool
 }
 
 // KV represents leaf storage within a HAMT node. A Pointer may hold up to
@@ -142,53 +164,6 @@ type KV struct {
 }
 
 //-----------------------------------------------------------------------------
-// Options
-
-// Option is a function that configures the node
-//
-// See UseTreeBitWidth and UseHashFunction
-type Option func(*Node)
-
-// UseTreeBitWidth allows you to set a custom bitWidth of the HAMT in bits
-// (from 1-8).
-//
-// Passing in the returned Option to NewNode will generate a new HAMT that uses
-// the specified bitWidth.
-//
-// The default bitWidth is 8.
-func UseTreeBitWidth(bitWidth int) Option {
-	return func(nd *Node) {
-		if bitWidth > 0 && bitWidth <= 8 {
-			nd.bitWidth = bitWidth
-		}
-	}
-}
-
-// UseHashFunction allows you to set the hash function used for internal
-// indexing by the HAMT.
-//
-// Passing in the returned Option to NewNode will generate a new HAMT that uses
-// the specified hash function.
-//
-// The default hash function is murmur3-x64 but you should use a
-// cryptographically secure function such as SHA2-256 if an attacker may be
-// able to pick the keys in order to avoid potential hash collision (tree
-// explosion) attacks.
-func UseHashFunction(hash func([]byte) []byte) Option {
-	return func(nd *Node) {
-		nd.hash = hash
-	}
-}
-
-// WithPrototype sets the ipld Prototype for the Hamt Node, to support
-// the use of the ipld MapIterator reconstruction of values.
-func WithPrototype(proto ipld.NodePrototype) Option {
-	return func(nd *Node) {
-		nd.proto = proto
-	}
-}
-
-//-----------------------------------------------------------------------------
 // Instance and helpers functions
 
 // NewNode creates a new IPLD HAMT Node with the given IPLD store and any
@@ -196,61 +171,54 @@ func WithPrototype(proto ipld.NodePrototype) Option {
 //
 // This function creates a new HAMT that you can use directly and is also
 // used internally to create child nodes.
-func NewNode(cs cbor.IpldStore, options ...Option) *Node {
-	nd := &Node{
-		Bitfield: big.NewInt(0),
-		Pointers: make([]*Pointer, 0),
-		store:    cs,
-		hash:     defaultHashFunction,
-		bitWidth: defaultBitWidth,
-	}
-	// apply functional options to node before using
+func NewNode(cs cbor.IpldStore, options ...Option) (*Node, error) {
+	cfg := defaultConfig()
 	for _, option := range options {
-		option(nd)
+		if err := option(cfg); err != nil {
+			return nil, err
+		}
 	}
-	return nd
+
+	return newNode(cs, cfg.hashFn, cfg.bitWidth), nil
 }
 
 // Find navigates through the HAMT structure to where key `k` should exist. If
-// the key is not found, an ErrNotFound error is returned. If the key is found
-// and the `out` parameter has an UnmarshalCBOR(Reader) method, the decoded
-// value is returned. If found and the `out` parameter is `nil`, then `nil`
-// will be returned (can be used to determine if a key exists where you don't
-// need the value, e.g. using the HAMT as a Set).
+// the key is not found, returns false. If the key is found, returns true, and
+// if the `out` parameter has an UnmarshalCBOR(Reader) method, the
+// value is decoded into it. The `out` parameter may be nil to test for existence
+// without decoding.
 //
 // Depending on the size of the HAMT, this method may load a large number of
 // child nodes via the HAMT's IpldStore.
-func (n *Node) Find(ctx context.Context, k string, out interface{}) error {
-	return n.getValue(ctx, &hashBits{b: n.hash([]byte(k))}, k, func(kv *KV) error {
-		// used to just see if the thing exists in the set
+func (n *Node) Find(ctx context.Context, k string, out cbg.CBORUnmarshaler) (bool, error) {
+	var found bool
+	err := n.getValue(ctx, &hashBits{b: n.hash([]byte(k))}, k, func(kv *KV) error {
+		found = true
+		// Note that an interface pointer-to-nil is not == nil and, if received here, will panic.
 		if out == nil {
 			return nil
 		}
-
-		if um, ok := out.(cbg.CBORUnmarshaler); ok {
-			return um.UnmarshalCBOR(bytes.NewReader(kv.Value.Raw))
-		}
-
-		if err := cbor.DecodeInto(kv.Value.Raw, out); err != nil {
-			return xerrors.Errorf("cbor decoding value: %w", err)
-		}
-
-		return nil
+		return out.UnmarshalCBOR(bytes.NewReader(kv.Value.Raw))
 	})
+	return found, err
 }
 
 // FindRaw performs the same function as Find, but returns the raw bytes found
 // at the key's location (which may or may not be DAG-CBOR, see also SetRaw).
-func (n *Node) FindRaw(ctx context.Context, k string) ([]byte, error) {
-	var ret []byte
+func (n *Node) FindRaw(ctx context.Context, k string) (bool, []byte, error) {
+	var found bool
+	var value []byte
 	err := n.getValue(ctx, &hashBits{b: n.hash([]byte(k))}, k, func(kv *KV) error {
-		ret = kv.Value.Raw
+		found = true
+		value = kv.Value.Raw
 		return nil
 	})
-	return ret, err
+	return found, value, err
 }
 
-// Delete removes an entry entirely from the HAMT structure.
+// Delete removes an entry from the HAMT structure.
+//
+// Returns true if the key was found and deleted, false if the key was absent.
 //
 // This operation will result in the modification of _at least_ one IPLD block
 // via the IpldStore. Depending on the contents of the leaf node, this
@@ -258,14 +226,28 @@ func (n *Node) FindRaw(ctx context.Context, k string) ([]byte, error) {
 // canonical form for the remaining data. For an insufficiently random
 // collection of keys at the relevant leaf nodes such a collapse may cascade to
 // further nodes.
-func (n *Node) Delete(ctx context.Context, k string) error {
+func (n *Node) Delete(ctx context.Context, k string) (bool, error) {
 	kb := []byte(k)
-	return n.modifyValue(ctx, &hashBits{b: n.hash(kb)}, kb, nil)
+	modified, err := n.modifyValue(ctx, &hashBits{b: n.hash(kb)}, kb, nil, OVERWRITE)
+	return modified == MODIFIED, err
+}
+
+// Constructs a new node value.
+func newNode(cs cbor.IpldStore, hashFn HashFunc, bitWidth int) *Node {
+	nd := &Node{
+		Bitfield: big.NewInt(0),
+		Pointers: make([]*Pointer, 0),
+		bitWidth: bitWidth,
+		hash:     hashFn,
+		store:    cs,
+	}
+	return nd
 }
 
 // handle the two Find operations in a recursive manner, where each node in the
-// HAMT we traverse we call this function again with the same parameters. Note
-// that `hv` contains state and `hv.Next()` is not idempotent. Each call
+// HAMT we traverse we call this function again with the same parameters.
+// Invokes the callback if and only if the key is found.
+// Note that `hv` contains state and `hv.Next()` is not idempotent. Each call
 // increments a counter for the number of bits consumed.
 func (n *Node) getValue(ctx context.Context, hv *hashBits, k string, cb func(*KV) error) error {
 	// hv.Next chomps off `bitWidth` bits from the hash digest. As we proceed
@@ -280,7 +262,7 @@ func (n *Node) getValue(ctx context.Context, hv *hashBits, k string, cb func(*KV
 	// if the element expected at this node isn't here then we can be sure it
 	// doesn't exist in the HAMT.
 	if n.Bitfield.Bit(idx) == 0 {
-		return ErrNotFound
+		return nil
 	}
 
 	// otherwise, the value is either local or in a child
@@ -309,12 +291,12 @@ func (n *Node) getValue(ctx context.Context, hv *hashBits, k string, cb func(*KV
 		}
 	}
 
-	return ErrNotFound
+	return nil
 }
 
 // load a HAMT node from the IpldStore and pass on the (assumed) parameters
 // that are not stored with the node.
-func (p *Pointer) loadChild(ctx context.Context, ns cbor.IpldStore, bitWidth int, hash func([]byte) []byte, proto ipld.NodePrototype) (*Node, error) {
+func (p *Pointer) loadChild(ctx context.Context, ns cbor.IpldStore, bitWidth int, hash HashFunc) (*Node, error) {
 	if p.cache != nil {
 		return p.cache, nil
 	}
@@ -326,6 +308,26 @@ func (p *Pointer) loadChild(ctx context.Context, ns cbor.IpldStore, bitWidth int
 	out.proto = proto
 
 	p.cache = out
+	return out, nil
+}
+
+// load a HAMT node from the IpldStore passing on the (assumed) parameters
+// that are not stored with the node and return all KVs of the child and its children.
+func (p *Pointer) loadChildKVs(ctx context.Context, ns cbor.IpldStore, bitWidth int, hash HashFunc) ([]*KV, error) {
+	child, err := p.loadChild(ctx, ns, bitWidth, hash)
+	if err != nil {
+		return nil, err
+	}
+	var out []*KV
+	if err := child.ForEach(ctx, func(k string, val *cbg.Deferred) error {
+		out = append(out, &KV{
+			Key:   []byte(k),
+			Value: val,
+		})
+		return nil
+	}); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -341,7 +343,13 @@ func (p *Pointer) loadChild(ctx context.Context, ns cbor.IpldStore, bitWidth int
 // of this library to remain the defaults long-term and have strategies in
 // place to manage variations.
 func LoadNode(ctx context.Context, cs cbor.IpldStore, c cid.Cid, options ...Option) (*Node, error) {
-	return loadNode(ctx, cs, c, true, defaultBitWidth, defaultHashFunction, options...)
+	cfg := defaultConfig()
+	for _, option := range options {
+		if err := option(cfg); err != nil {
+			return nil, err
+		}
+	}
+	return loadNode(ctx, cs, c, true, cfg.bitWidth, cfg.hashFn)
 }
 
 // internal version of loadNode that is aware of whether this is a root node or
@@ -352,10 +360,8 @@ func loadNode(
 	c cid.Cid,
 	isRoot bool,
 	bitWidth int,
-	hashFunction func([]byte) []byte,
-	options ...Option,
+	hashFunction HashFunc,
 ) (*Node, error) {
-
 	var out Node
 	if err := cs.Get(ctx, c, &out); err != nil {
 		return nil, err
@@ -364,10 +370,6 @@ func loadNode(
 	out.store = cs
 	out.bitWidth = bitWidth
 	out.hash = hashFunction
-	// apply functional options to node before using
-	for _, option := range options {
-		option(&out)
-	}
 
 	// Validation
 
@@ -384,7 +386,9 @@ func loadNode(
 	for _, ch := range out.Pointers {
 		isLink := ch.isShard()
 		isBucket := ch.KVs != nil
-		if !((isLink && !isBucket) || (!isLink && isBucket)) {
+		if isLink == isBucket {
+			// Pointer#UnmarshalCBOR shouldn't allow this
+			// A node can only be one of link or bucket
 			return nil, ErrMalformedHamt
 		}
 		if isLink && ch.Link.Type() != cid.DagCBOR { // not dag-cbor
@@ -456,13 +460,41 @@ func (n *Node) checkSize(ctx context.Context) (uint64, error) {
 	return totsize, nil
 }
 
-// Flush saves and purges any cached Nodes recursively from this Node through
-// its (cached) children. Cached nodes primarily exist through the use of
-// Copy() operations where the entire graph is instantiated in memory and each
-// child pointer exists in cached form.
+// Write is a convenience method that calls flush and writes the node to it's
+// internal store, returning the CID of the stored node. It is equivelant to:
+//   n.Flush
+//   store.Put(ctx, n)
+// where store is equal to the store provided to the node when constructed.
+//
+// write should only be called on the root node of a HAMT
+func (n *Node) Write(ctx context.Context) (cid.Cid, error) {
+	if err := n.Flush(ctx); err != nil {
+		return cid.Undef, err
+	}
+
+	return n.store.Put(ctx, n)
+}
+
+// Flush has two effects, it (partially!) persists data and resets dirty flag
+//
+// Flush operates recursively, telling each "cache" child node to flush;
+// Put'ing that "cache" node to the store;
+// updating this node's Link to the CID resulting from the store Put;
+// clearing the dirty flag of that pointer to flase
+// and then returning.
+// Flush doesn't operate unless there's a "cache" node.
+//
+// "cache" nodes were previously storing either updated values,
+// or, simply storing previously loaded data; these are disambiguated by the
+// dirty flag which is true when the cache node's data has not been persisted
+//
+// Notice that Flush _does not_ Put _this node_.
+// To fully persist changes, the caller still needs to Put this node to the
+// store themselves, and store the new resulting Link wherever they expect the
+// updated HAMT to be seen.
 func (n *Node) Flush(ctx context.Context) error {
 	for _, p := range n.Pointers {
-		if p.cache != nil {
+		if p.cache != nil && p.dirty {
 			if err := p.cache.Flush(ctx); err != nil {
 				return err
 			}
@@ -472,7 +504,7 @@ func (n *Node) Flush(ctx context.Context) error {
 				return err
 			}
 
-			p.cache = nil
+			p.dirty = false
 			p.Link = c
 		}
 	}
@@ -481,27 +513,45 @@ func (n *Node) Flush(ctx context.Context) error {
 
 // Set key k to value v, where v is has a MarshalCBOR(bytes.Buffer) method to
 // encode it.
-func (n *Node) Set(ctx context.Context, k string, v interface{}) error {
-	var d *cbg.Deferred
-
-	kb := []byte(k)
-
-	cm, ok := v.(cbg.CBORMarshaler)
-	if ok {
-		buf := new(bytes.Buffer)
-		if err := cm.MarshalCBOR(buf); err != nil {
-			return err
-		}
-		d = &cbg.Deferred{Raw: buf.Bytes()}
+//
+// To fully commit the change, it is necessary to Flush the root Node,
+// and then additionally Put the root node to the store itself,
+// and save the resulting CID wherever you expect the HAMT root to persist.
+func (n *Node) Set(ctx context.Context, k string, v cbg.CBORMarshaler) error {
+	var d cbg.Deferred
+	if v == nil {
+		d.Raw = cbg.CborNull
 	} else {
-		b, err := cbor.DumpObject(v)
-		if err != nil {
+		valueBuf := new(bytes.Buffer)
+		if err := v.MarshalCBOR(valueBuf); err != nil {
 			return err
 		}
-		d = &cbg.Deferred{Raw: b}
+		d.Raw = valueBuf.Bytes()
 	}
 
-	return n.modifyValue(ctx, &hashBits{b: n.hash(kb)}, kb, d)
+	keyBytes := []byte(k)
+	_, err := n.modifyValue(ctx, &hashBits{b: n.hash(keyBytes)}, keyBytes, &d, OVERWRITE)
+	return err
+}
+
+// SetIfAbsent sets key k to value v only if k is not already set to some value.
+// Returns true if the value mapped to k is changed by this operation
+// false otherwise.
+func (n *Node) SetIfAbsent(ctx context.Context, k string, v cbg.CBORMarshaler) (bool, error) {
+	var d cbg.Deferred
+	if v == nil {
+		d.Raw = cbg.CborNull
+	} else {
+		valueBuf := new(bytes.Buffer)
+		if err := v.MarshalCBOR(valueBuf); err != nil {
+			return false, err
+		}
+		d.Raw = valueBuf.Bytes()
+	}
+
+	keyBytes := []byte(k)
+	modified, err := n.modifyValue(ctx, &hashBits{b: n.hash(keyBytes)}, keyBytes, &d, NOVERWRITE)
+	return bool(modified), err
 }
 
 // SetRaw is similar to Set but sets key k in the HAMT to raw bytes without
@@ -510,7 +560,8 @@ func (n *Node) Set(ctx context.Context, k string, v interface{}) error {
 func (n *Node) SetRaw(ctx context.Context, k string, raw []byte) error {
 	d := &cbg.Deferred{Raw: raw}
 	kb := []byte(k)
-	return n.modifyValue(ctx, &hashBits{b: n.hash(kb)}, kb, d)
+	_, err := n.modifyValue(ctx, &hashBits{b: n.hash(kb)}, kb, d, OVERWRITE)
+	return err
 }
 
 // the number of links to child nodes this node contains
@@ -593,17 +644,20 @@ func (n *Node) cleanChild(chnd *Node, cindex byte) error {
 // cleanNode()). Recursive calls use the same arguments on child nodes but
 // note that `hv.Next()` is not idempotent. Each call will increment the number
 // of bits chomped off the hash digest for this key.
-func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.Deferred) error {
+func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.Deferred, replace overwrite) (modified, error) {
 	idx, err := hv.Next(n.bitWidth)
 	if err != nil {
-		return ErrMaxDepth
+		return UNMODIFIED, ErrMaxDepth
 	}
 
 	// if the element expected at this node isn't here then we can be sure it
 	// doesn't exist in the HAMT already and can insert it at the appropriate
 	// position.
 	if n.Bitfield.Bit(idx) != 1 {
-		return n.insertKV(idx, k, v)
+		if v == nil { // Delete absent key
+			return UNMODIFIED, nil
+		}
+		return MODIFIED, n.insertKV(idx, k, v)
 	}
 
 	// otherwise, the value is either local or in a child
@@ -614,14 +668,26 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.D
 	child := n.getPointer(cindex)
 	if child.isShard() {
 		// if isShard, we have a pointer to a child that we need to load and
-		// delegate our modify operation to
-		chnd, err := child.loadChild(ctx, n.store, n.bitWidth, n.hash, n.proto)
+		// delegate our modify operation to.
+		// Note that this loadChild operation will cause the loaded node to be
+		// "cached" and this pointer to be marked as dirty;
+		// it is an eventual Flush passing back over this "cache" node which
+		// causes the updates made to the in-memory "cache" node to eventually
+		// be persisted.
+		chnd, err := child.loadChild(ctx, n.store, n.bitWidth, n.hash)
 		if err != nil {
-			return err
+			return UNMODIFIED, err
 		}
 
-		if err := chnd.modifyValue(ctx, hv, k, v); err != nil {
-			return err
+		modified, err := chnd.modifyValue(ctx, hv, k, v, replace)
+		if err != nil {
+			return UNMODIFIED, err
+		}
+
+		if modified {
+			// if we are modifying set the child.dirty
+			// if we are not modifying leave it be, another operation might had set it previously
+			child.dirty = true
 		}
 
 		// CHAMP optimization, ensure the HAMT retains its canonical form for the
@@ -630,11 +696,11 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.D
 		// existence.
 		if v == nil {
 			if err := n.cleanChild(chnd, cindex); err != nil {
-				return err
+				return UNMODIFIED, err
 			}
 		}
 
-		return nil
+		return modified, nil
 	}
 
 	// if not isShard, then either the key/value pair is local here and can be
@@ -648,56 +714,45 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.D
 			if bytes.Equal(p.Key, k) {
 				if len(child.KVs) == 1 {
 					// last element in the bucket, remove it and update the bitfield
-					return n.rmPointer(cindex, idx)
+					return MODIFIED, n.rmPointer(cindex, idx)
 				}
 
 				copy(child.KVs[i:], child.KVs[i+1:])
 				child.KVs = child.KVs[:len(child.KVs)-1]
-				return nil
+				return MODIFIED, nil
 			}
 		}
-		return ErrNotFound
+		return UNMODIFIED, nil // Delete absent key
 	}
 
 	// modify existing, check if key already exists
 	for _, p := range child.KVs {
 		if bytes.Equal(p.Key, k) {
-			p.Value = v
-			return nil
+			if bool(replace) && !bytes.Equal(p.Value.Raw, v.Raw) {
+				p.Value = v
+				return MODIFIED, nil
+			}
+			return UNMODIFIED, nil
 		}
 	}
 
 	if len(child.KVs) >= bucketSize {
 		// bucket is full, create a child node (shard) with all existing bucket
 		// elements plus the new one and set it in the place of the bucket
-		// TODO(rvagg): this all of the modifyValue() calls are going to result
-		// in a store.Put(), this could be improved by allowing NewNode() to take
-		// the bulk set of elements, or modifying modifyValue() for the case
-		// where we know for sure that the elements will go into buckets and
-		// not cause an overflow - i.e. we just need to take each element, hash it
-		// and consume the correct number of bytes off the digest and figure out
-		// where it should be in the new node.
-		sub := NewNode(n.store)
-		sub.bitWidth = n.bitWidth
-		sub.hash = n.hash
+		sub := newNode(n.store, n.hash, n.bitWidth)
 		hvcopy := &hashBits{b: hv.b, consumed: hv.consumed}
-		if err := sub.modifyValue(ctx, hvcopy, k, v); err != nil {
-			return err
+		if _, err := sub.modifyValue(ctx, hvcopy, k, v, replace); err != nil {
+			return UNMODIFIED, err
 		}
 
 		for _, p := range child.KVs {
-			chhv := &hashBits{b: n.hash([]byte(p.Key)), consumed: hv.consumed}
-			if err := sub.modifyValue(ctx, chhv, p.Key, p.Value); err != nil {
-				return err
+			chhv := &hashBits{b: n.hash(p.Key), consumed: hv.consumed}
+			if _, err := sub.modifyValue(ctx, chhv, p.Key, p.Value, replace); err != nil {
+				return UNMODIFIED, err
 			}
 		}
 
-		c, err := n.store.Put(ctx, sub)
-		if err != nil {
-			return err
-		}
-
-		return n.setPointer(cindex, &Pointer{Link: c})
+		return MODIFIED, n.setPointer(cindex, &Pointer{cache: sub, dirty: true})
 	}
 
 	// otherwise insert the new element into the array in order, the ordering is
@@ -706,21 +761,17 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.D
 	for i := 0; i < len(child.KVs); i++ {
 		if bytes.Compare(k, child.KVs[i].Key) < 0 {
 			child.KVs = append(child.KVs[:i], append([]*KV{np}, child.KVs[i:]...)...)
-			return nil
+			return MODIFIED, nil
 		}
 	}
 	child.KVs = append(child.KVs, np)
-	return nil
+	return MODIFIED, nil
 }
 
 // Insert a new key/value pair into the current node at the specified index.
 // This will involve modifying the bitfield for that index and inserting a new
 // bucket containing the single key/value pair at that position.
 func (n *Node) insertKV(idx int, k []byte, v *cbg.Deferred) error {
-	if v == nil {
-		return ErrNotFound
-	}
-
 	i := n.indexForBitPos(idx)
 	n.Bitfield.SetBit(n.Bitfield, idx, 1)
 
@@ -752,7 +803,7 @@ func (n *Node) rmPointer(i byte, idx int) error {
 // Load a Pointer from the specified index of the Pointers array. The element
 // should exist in a properly formed HAMT.
 func (n *Node) getPointer(i byte) *Pointer {
-	if int(i) >= len(n.Pointers) || i < 0 {
+	if int(i) >= len(n.Pointers) {
 		// TODO(rvagg): I think this should be an error, there's an assumption in
 		// calling code that it's not null and a proper hash chomp shouldn't result
 		// in anything out of bounds
@@ -769,9 +820,7 @@ func (n *Node) getPointer(i byte) *Pointer {
 // as cached nodes.
 func (n *Node) Copy() *Node {
 	// TODO(rvagg): clarify what situations this method is actually useful for.
-	nn := NewNode(n.store)
-	nn.bitWidth = n.bitWidth
-	nn.hash = n.hash
+	nn := newNode(n.store, n.hash, n.bitWidth)
 	nn.Bitfield.Set(n.Bitfield)
 	nn.Pointers = make([]*Pointer, len(n.Pointers))
 
@@ -779,6 +828,7 @@ func (n *Node) Copy() *Node {
 		pp := &Pointer{}
 		if p.cache != nil {
 			pp.cache = p.cache.Copy()
+			pp.dirty = p.dirty
 		}
 		pp.Link = p.Link
 		if p.KVs != nil {
@@ -796,14 +846,14 @@ func (n *Node) Copy() *Node {
 // Pointers elements can either contain a bucket of local elements or be a
 // link to a child node. In the case of a link, isShard() returns true.
 func (p *Pointer) isShard() bool {
-	return p.Link.Defined()
+	return p.cache != nil || p.Link.Defined()
 }
 
 // ForEach recursively calls function f on each k / val pair found in the HAMT.
 // This performs a full traversal of the graph and for large HAMTs can cause
-// a large number of loads from the IpldStore. This should not be used lightly
-// as it can incur large costs.
-func (n *Node) ForEach(ctx context.Context, f func(k string, val interface{}) error) error {
+// a large number of loads from the underlying store.
+// The values are returned as raw bytes, not decoded.
+func (n *Node) ForEach(ctx context.Context, f func(k string, val *cbg.Deferred) error) error {
 	for _, p := range n.Pointers {
 		if p.isShard() {
 			chnd, err := p.loadChild(ctx, n.store, n.bitWidth, n.hash, n.proto)
