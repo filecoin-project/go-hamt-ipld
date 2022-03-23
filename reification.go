@@ -13,7 +13,6 @@ import (
 	"github.com/ipld/go-ipld-prime/codec/dagcbor"
 	"github.com/ipld/go-ipld-prime/linking"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
-	"github.com/ipld/go-ipld-prime/node/basicnode"
 	cbg "github.com/whyrusleeping/cbor-gen"
 )
 
@@ -69,46 +68,28 @@ func MakeReifier(opts ...Option) ipld.NodeReifier {
 		store := cbor.NewCborStore(&bs)
 		bfi := big.NewInt(0).SetBytes(bitFieldBytes)
 
-		hn := &Node{
-			Bitfield: bfi,
-			Pointers: ptrs,
-			bitWidth: defaultBitWidth,
-			hash:     defaultHashFunction,
-			store:    store,
-			proto:    basicnode.Prototype.Map,
-		}
+		cfg := defaultConfig()
 		for _, o := range opts {
-			o(hn)
+			o(cfg)
 		}
+		hn := newNode(store, cfg.hashFn, cfg.bitWidth, cfg.proto)
+		hn.Bitfield = bfi
+		hn.Pointers = ptrs
 
 		return hn, nil
 	}
 }
 
 func loadPointer(p ipld.Node) (*Pointer, error) {
-	if p.Kind() != ipld.Kind_Map {
-		return nil, fmt.Errorf("invalid pointer kind")
-	}
-	pm := p.MapIterator()
-	k, v, err := pm.Next()
-	if err != nil {
-		return nil, fmt.Errorf("no pointer map key")
-	}
-	ks, err := k.AsString()
-	if err != nil {
-		return nil, fmt.Errorf("pointer map key not string")
-	}
-	// this is a link.
-	if ks == string(keyZero) {
-		lnk, err := v.AsLink()
+	if p.Kind() != ipld.Kind_Link {
+		lnk, err := p.AsLink()
 		if err != nil {
 			return nil, fmt.Errorf("pointer union indicates link, but not link")
 		}
 		return &Pointer{Link: lnk.(cidlink.Link).Cid}, nil
-		// this is an array of kvs
-	} else if ks == string(keyOne) {
+	} else if p.Kind() == ipld.Kind_List {
 		kvs := make([]*KV, 0)
-		li := v.ListIterator()
+		li := p.ListIterator()
 		for !li.Done() {
 			_, kvn, err := li.Next()
 			if err != nil {
@@ -121,9 +102,8 @@ func loadPointer(p ipld.Node) (*Pointer, error) {
 			kvs = append(kvs, kv)
 		}
 		return &Pointer{KVs: kvs}, nil
-	} else {
-		return nil, fmt.Errorf("invalid pointer union signal")
 	}
+	return nil, fmt.Errorf("unsupported pointer kind")
 }
 
 func loadKV(n ipld.Node) (*KV, error) {

@@ -428,7 +428,7 @@ func printHamt(hamt *Node) {
 		fmt.Printf("%s‣ %v:\n", strings.Repeat("  ", depth), c)
 		for _, p := range n.Pointers {
 			if p.isShard() {
-				child, err := p.loadChild(ctx, n.store, n.bitWidth, n.hash, n.proto)
+				child, err := p.loadChild(ctx, n.store, n.bitWidth, n.hash)
 				if err != nil {
 					panic(err)
 				}
@@ -452,7 +452,7 @@ func dotGraphRec(n *Node, name *int) {
 		if p.isShard() {
 			*name++
 			fmt.Printf("\tn%d -> n%d;\n", cur, *name)
-			nd, err := p.loadChild(context.Background(), n.store, n.bitWidth, n.hash, n.proto)
+			nd, err := p.loadChild(context.Background(), n.store, n.bitWidth, n.hash)
 			if err != nil {
 				panic(err)
 			}
@@ -488,7 +488,7 @@ func statsrec(n *Node, st *hamtStats) {
 	st.totalNodes++
 	for _, p := range n.Pointers {
 		if p.isShard() {
-			nd, err := p.loadChild(context.Background(), n.store, n.bitWidth, n.hash, n.proto)
+			nd, err := p.loadChild(context.Background(), n.store, n.bitWidth, n.hash)
 			if err != nil {
 				panic(err)
 			}

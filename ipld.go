@@ -6,32 +6,33 @@ import (
 
 	"github.com/ipld/go-ipld-prime"
 	"github.com/ipld/go-ipld-prime/codec/dagcbor"
+	"github.com/ipld/go-ipld-prime/node/basicnode"
 )
 
 var _ ipld.Node = (*Node)(nil)
 
 func (n *Node) AsBool() (bool, error) {
-	return false, ErrNotFound
+	return false, ipld.ErrWrongKind{}
 }
 
 func (n *Node) AsBytes() ([]byte, error) {
-	return nil, ErrNotFound
+	return nil, ipld.ErrWrongKind{}
 }
 
 func (n *Node) AsString() (string, error) {
-	return "", ErrNotFound
+	return "", ipld.ErrWrongKind{}
 }
 
 func (n *Node) AsInt() (int64, error) {
-	return 0, ErrNotFound
+	return 0, ipld.ErrWrongKind{}
 }
 
 func (n *Node) AsFloat() (float64, error) {
-	return 0.0, ErrNotFound
+	return 0.0, ipld.ErrWrongKind{}
 }
 
 func (n *Node) AsLink() (ipld.Link, error) {
-	return nil, ErrNotFound
+	return nil, ipld.ErrWrongKind{}
 }
 
 func (n *Node) IsAbsent() bool {
@@ -46,10 +47,11 @@ func (n *Node) Length() int64 {
 	l := int64(0)
 	for _, p := range n.Pointers {
 		if p.Link.Defined() {
-			c, err := p.loadChild(context.Background(), n.store, n.bitWidth, n.hash, n.proto)
+			c, err := p.loadChild(context.Background(), n.store, n.bitWidth, n.hash)
 			if err != nil {
 				return -1
 			}
+			c.proto = n.proto
 			l += c.Length()
 		} else {
 			l += int64(len(p.KVs))
@@ -71,9 +73,12 @@ func (n *Node) Kind() ipld.Kind {
 //
 // If the key does not exist, a nil node and an error will be returned.
 func (n *Node) LookupByString(key string) (ipld.Node, error) {
-	data, err := n.FindRaw(context.Background(), key)
+	ok, data, err := n.FindRaw(context.Background(), key)
 	if err != nil {
 		return nil, err
+	}
+	if !ok {
+		return nil, ipld.ErrNotExists{}
 	}
 	_, val, err := n.realize(key, data)
 	return val, err
@@ -97,7 +102,7 @@ func (n *Node) LookupByNode(key ipld.Node) (ipld.Node, error) {
 }
 
 func (n *Node) LookupByIndex(idx int64) (ipld.Node, error) {
-	return nil, ErrNotFound
+	return nil, ipld.ErrWrongKind{}
 }
 
 func (n *Node) LookupBySegment(seg ipld.PathSegment) (ipld.Node, error) {
@@ -142,11 +147,12 @@ func (mi *hmi) loadNext() {
 	p := mi.up[0]
 	mi.up = mi.up[1:]
 	if p.isShard() {
-		chld, err := p.loadChild(context.Background(), mi.at.store, mi.at.bitWidth, mi.at.hash, mi.at.proto)
+		chld, err := p.loadChild(context.Background(), mi.at.store, mi.at.bitWidth, mi.at.hash)
 		if err != nil {
 			mi.err = err
 			return
 		}
+		chld.proto = mi.at.proto
 		mi.up = append(mi.up, chld.Pointers...)
 	} else {
 		mi.ukv = append(mi.ukv, p.KVs...)
@@ -250,28 +256,28 @@ func (h *hamtBuilder) ValuePrototype(k string) ipld.NodePrototype {
 }
 
 func (h *hamtBuilder) BeginList(sizeHint int64) (ipld.ListAssembler, error) {
-	return nil, ErrNotFound
+	return nil, ipld.ErrWrongKind{}
 }
 func (h *hamtBuilder) AssignNull() error {
-	return ErrNotFound
+	return ipld.ErrWrongKind{}
 }
 func (h *hamtBuilder) AssignBool(bool) error {
-	return ErrNotFound
+	return ipld.ErrWrongKind{}
 }
 func (h *hamtBuilder) AssignInt(int64) error {
-	return ErrNotFound
+	return ipld.ErrWrongKind{}
 }
 func (h *hamtBuilder) AssignFloat(float64) error {
-	return ErrNotFound
+	return ipld.ErrWrongKind{}
 }
 func (h *hamtBuilder) AssignString(string) error {
-	return ErrNotFound
+	return ipld.ErrWrongKind{}
 }
 func (h *hamtBuilder) AssignBytes([]byte) error {
-	return ErrNotFound
+	return ipld.ErrWrongKind{}
 }
 func (h *hamtBuilder) AssignLink(ipld.Link) error {
-	return ErrNotFound
+	return ipld.ErrWrongKind{}
 }
 
 func (h *hamtBuilder) AssignNode(n ipld.Node) error {
@@ -284,5 +290,8 @@ func (h *hamtBuilder) AssignNode(n ipld.Node) error {
 }
 
 func (h *hamtBuilder) Prototype() ipld.NodePrototype {
+	if h.proto == nil {
+		return basicnode.Prototype__Map{}
+	}
 	return h.proto
 }

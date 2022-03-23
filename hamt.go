@@ -179,7 +179,7 @@ func NewNode(cs cbor.IpldStore, options ...Option) (*Node, error) {
 		}
 	}
 
-	return newNode(cs, cfg.hashFn, cfg.bitWidth), nil
+	return newNode(cs, cfg.hashFn, cfg.bitWidth, cfg.proto), nil
 }
 
 // Find navigates through the HAMT structure to where key `k` should exist. If
@@ -233,13 +233,14 @@ func (n *Node) Delete(ctx context.Context, k string) (bool, error) {
 }
 
 // Constructs a new node value.
-func newNode(cs cbor.IpldStore, hashFn HashFunc, bitWidth int) *Node {
+func newNode(cs cbor.IpldStore, hashFn HashFunc, bitWidth int, proto ipld.NodePrototype) *Node {
 	nd := &Node{
 		Bitfield: big.NewInt(0),
 		Pointers: make([]*Pointer, 0),
 		bitWidth: bitWidth,
 		hash:     hashFn,
 		store:    cs,
+		proto:    proto,
 	}
 	return nd
 }
@@ -274,10 +275,11 @@ func (n *Node) getValue(ctx context.Context, hv *hashBits, k string, cb func(*KV
 	if c.isShard() {
 		// if isShard, we have a pointer to a child that we need to load and
 		// delegate our find operation to
-		chnd, err := c.loadChild(ctx, n.store, n.bitWidth, n.hash, n.proto)
+		chnd, err := c.loadChild(ctx, n.store, n.bitWidth, n.hash)
 		if err != nil {
 			return err
 		}
+		chnd.proto = n.proto
 
 		return chnd.getValue(ctx, hv, k, cb)
 	}
@@ -305,7 +307,6 @@ func (p *Pointer) loadChild(ctx context.Context, ns cbor.IpldStore, bitWidth int
 	if err != nil {
 		return nil, err
 	}
-	out.proto = proto
 
 	p.cache = out
 	return out, nil
@@ -445,10 +446,11 @@ func (n *Node) checkSize(ctx context.Context) (uint64, error) {
 	totsize := uint64(len(def.Raw))
 	for _, ch := range n.Pointers {
 		if ch.isShard() {
-			chnd, err := ch.loadChild(ctx, n.store, n.bitWidth, n.hash, n.proto)
+			chnd, err := ch.loadChild(ctx, n.store, n.bitWidth, n.hash)
 			if err != nil {
 				return 0, err
 			}
+			chnd.proto = n.proto
 			chsize, err := chnd.checkSize(ctx)
 			if err != nil {
 				return 0, err
@@ -739,7 +741,7 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.D
 	if len(child.KVs) >= bucketSize {
 		// bucket is full, create a child node (shard) with all existing bucket
 		// elements plus the new one and set it in the place of the bucket
-		sub := newNode(n.store, n.hash, n.bitWidth)
+		sub := newNode(n.store, n.hash, n.bitWidth, n.proto)
 		hvcopy := &hashBits{b: hv.b, consumed: hv.consumed}
 		if _, err := sub.modifyValue(ctx, hvcopy, k, v, replace); err != nil {
 			return UNMODIFIED, err
@@ -820,7 +822,7 @@ func (n *Node) getPointer(i byte) *Pointer {
 // as cached nodes.
 func (n *Node) Copy() *Node {
 	// TODO(rvagg): clarify what situations this method is actually useful for.
-	nn := newNode(n.store, n.hash, n.bitWidth)
+	nn := newNode(n.store, n.hash, n.bitWidth, n.proto)
 	nn.Bitfield.Set(n.Bitfield)
 	nn.Pointers = make([]*Pointer, len(n.Pointers))
 
@@ -856,10 +858,11 @@ func (p *Pointer) isShard() bool {
 func (n *Node) ForEach(ctx context.Context, f func(k string, val *cbg.Deferred) error) error {
 	for _, p := range n.Pointers {
 		if p.isShard() {
-			chnd, err := p.loadChild(ctx, n.store, n.bitWidth, n.hash, n.proto)
+			chnd, err := p.loadChild(ctx, n.store, n.bitWidth, n.hash)
 			if err != nil {
 				return err
 			}
+			chnd.proto = n.proto
 
 			if err := chnd.ForEach(ctx, f); err != nil {
 				return err
