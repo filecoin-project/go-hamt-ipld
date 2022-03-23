@@ -47,7 +47,7 @@ func MakeReifier(opts ...Option) ipld.NodeReifier {
 		if pointers.Kind() != ipld.Kind_List {
 			return maybeHamt, nil
 		}
-		if li.Done() != true {
+		if !li.Done() {
 			return maybeHamt, nil
 		}
 		ptrs := make([]*Pointer, 0)
