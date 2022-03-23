@@ -10,7 +10,6 @@ import (
 
 	cbor "github.com/ipfs/go-ipld-cbor"
 	"github.com/stretchr/testify/require"
-	cbg "github.com/whyrusleeping/cbor-gen"
 )
 
 var debugHistogram = false
@@ -25,10 +24,10 @@ func (r *rander) randString() string {
 	return hex.EncodeToString(buf)
 }
 
-func (r *rander) randValue() *cbg.Deferred {
-	buf := make([]byte, 30)
+func (r *rander) randValue() *CborByteArray {
+	buf := CborByteArray(make([]byte, 30))
 	rand.Read(buf)
-	return &cbg.Deferred{Raw: buf}
+	return &buf
 }
 
 func BenchmarkSerializeNode(b *testing.B) {
@@ -52,6 +51,31 @@ func BenchmarkSerializeNode(b *testing.B) {
 	}
 }
 
+func BenchmarkGetNode(b *testing.B) {
+	r := rander{rand.New(rand.NewSource(1234))}
+
+	cs := cbor.NewCborStore(newMockBlocks())
+	n, err := NewNode(cs)
+	require.NoError(b, err)
+
+	for i := 0; i < 100000; i++ {
+		err := n.Set(context.Background(), r.randString(), r.randValue())
+		require.NoError(b, err)
+	}
+
+	c, err := cs.Put(context.Background(), n)
+	require.NoError(b, err)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		var n Node
+		err := cs.Get(context.Background(), c, &n)
+		require.NoError(b, err)
+	}
+}
+
 type benchSetCase struct {
 	kcount   int
 	bitwidth int
@@ -68,7 +92,7 @@ func init() {
 		100,
 		500,
 		1000, // aka 1M
-		//10000, // aka 10M -- you'll need a lot of RAM for this.  Also, some patience.
+		// 10000, // aka 10M -- you'll need a lot of RAM for this.  Also, some patience.
 	}
 	bitwidths := []int{
 		3,
@@ -119,7 +143,7 @@ func BenchmarkFill(b *testing.B) {
 				blockstore := newMockBlocks()
 				n, err := NewNode(cbor.NewCborStore(blockstore), UseTreeBitWidth(t.bitwidth))
 				require.NoError(b, err)
-				//b.ResetTimer()
+				// b.ResetTimer()
 				for j := 0; j < t.kcount*1000; j++ {
 					err := n.Set(context.Background(), r.randString(), r.randValue())
 					require.NoError(b, err)
