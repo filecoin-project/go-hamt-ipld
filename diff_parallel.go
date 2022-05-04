@@ -129,13 +129,10 @@ func (s *diffScheduler) startScheduler(ctx context.Context) {
 			close(s.in)
 		}()
 		for {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
 			if n := len(s.stack) - 1; n >= 0 {
 				select {
+				case <-ctx.Done():
+					return ctx.Err()
 				case newJob, ok := <-s.in:
 					if !ok {
 						return nil
@@ -147,6 +144,8 @@ func (s *diffScheduler) startScheduler(ctx context.Context) {
 				}
 			} else {
 				select {
+				case <-ctx.Done():
+					return ctx.Err()
 				case newJob, ok := <-s.in:
 					if !ok {
 						return nil
@@ -167,10 +166,11 @@ func (s *diffScheduler) startProcessor(ctx context.Context, outCh chan *Change) 
 			default:
 			}
 
+			// block until a worker becomes available
 			if err := s.sem.Acquire(ctx, 1); err != nil {
 				return err
 			}
-
+			// task to consume.
 			todo := todo
 
 			s.grp.Go(func() error {
