@@ -9,7 +9,6 @@ import (
 	cbor "github.com/ipfs/go-ipld-cbor"
 	cbg "github.com/whyrusleeping/cbor-gen"
 	"golang.org/x/sync/errgroup"
-	"golang.org/x/sync/semaphore"
 	"golang.org/x/xerrors"
 )
 
@@ -57,8 +56,8 @@ func doParallelDiffNode(ctx context.Context, pre, cur *Node, workers int64) ([]*
 
 	out := make(chan *Change, 2*workers)
 	differ, ctx := newDiffScheduler(ctx, workers, initTasks...)
+	differ.startWorkers(ctx, out)
 	differ.startScheduler(ctx)
-	differ.startProcessor(ctx, out)
 
 	var changes []*Change
 	done := make(chan struct{})
@@ -86,7 +85,24 @@ type task struct {
 	curBit uint
 }
 
+func newDiffScheduler(ctx context.Context, numWorkers int64, rootTasks ...*task) (*diffScheduler, context.Context) {
+	grp, ctx := errgroup.WithContext(ctx)
+	s := &diffScheduler{
+		numWorkers: numWorkers,
+		stack:      []*task{},
+		in:         make(chan *task, numWorkers),
+		out:        make(chan *task, numWorkers),
+		workerWg:   &sync.WaitGroup{},
+		grp:        grp,
+	}
+	s.workerWg.Add(len(rootTasks))
+	s.stack = append(s.stack, rootTasks...)
+	return s, ctx
+}
+
 type diffScheduler struct {
+	// number of worker routine to spawn
+	numWorkers int64
 	// buffer holds tasks until they are processed
 	stack []*task
 	// tasks arrive here
@@ -94,30 +110,13 @@ type diffScheduler struct {
 	// completed tasks exit here
 	out chan *task
 	// tracks number of inflight tasks
-	wg *sync.WaitGroup
-	// limits the number of parallel task-workers
-	sem *semaphore.Weighted
+	workerWg *sync.WaitGroup
 	// launches workers and collects errors if any occur
 	grp *errgroup.Group
 }
 
-func newDiffScheduler(ctx context.Context, numWorkers int64, rootTasks ...*task) (*diffScheduler, context.Context) {
-	grp, ctx := errgroup.WithContext(ctx)
-	s := &diffScheduler{
-		stack: []*task{},
-		in:    make(chan *task, numWorkers),
-		out:   make(chan *task, numWorkers),
-		wg:    &sync.WaitGroup{},
-		sem:   semaphore.NewWeighted(numWorkers),
-		grp:   grp,
-	}
-	s.wg.Add(len(rootTasks))
-	s.stack = append(s.stack, rootTasks...)
-	return s, ctx
-}
-
-func (s *diffScheduler) startTask(task *task) {
-	s.wg.Add(1)
+func (s *diffScheduler) enqueueTask(task *task) {
+	s.workerWg.Add(1)
 	s.in <- task
 }
 
@@ -125,7 +124,7 @@ func (s *diffScheduler) startScheduler(ctx context.Context) {
 	s.grp.Go(func() error {
 		defer close(s.out)
 		go func() {
-			s.wg.Wait()
+			s.workerWg.Wait()
 			close(s.in)
 		}()
 		for {
@@ -157,137 +156,128 @@ func (s *diffScheduler) startScheduler(ctx context.Context) {
 	})
 }
 
-func (s *diffScheduler) startProcessor(ctx context.Context, outCh chan *Change) {
-	s.grp.Go(func() error {
-		for todo := range s.out {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
+func (s *diffScheduler) startWorkers(ctx context.Context, out chan *Change) {
+	for i := int64(0); i < s.numWorkers; i++ {
+		s.grp.Go(func() error {
+			for task := range s.out {
+				if err := s.work(ctx, task, out); err != nil {
+					return err
+				}
 			}
+			return nil
+		})
+	}
+}
 
-			// block until a worker becomes available
-			if err := s.sem.Acquire(ctx, 1); err != nil {
+func (s *diffScheduler) work(ctx context.Context, todo *task, results chan *Change) error {
+	defer s.workerWg.Done()
+	idx := todo.idx
+	preBit := todo.preBit
+	pre := todo.pre
+	curBit := todo.curBit
+	cur := todo.cur
+
+	switch {
+	case preBit == 1 && curBit == 1:
+		// index for pre and cur will be unique to each, calculate it here.
+		prePointer := pre.getPointer(byte(pre.indexForBitPos(idx)))
+		curPointer := cur.getPointer(byte(cur.indexForBitPos(idx)))
+		switch {
+		// both pointers are shards, recurse down the tree.
+		case prePointer.isShard() && curPointer.isShard():
+			preChild, err := prePointer.loadChild(ctx, pre.store, pre.bitWidth, pre.hash)
+			if err != nil {
 				return err
 			}
-			// task to consume.
-			todo := todo
+			curChild, err := curPointer.loadChild(ctx, cur.store, cur.bitWidth, cur.hash)
+			if err != nil {
+				return err
+			}
 
-			s.grp.Go(func() error {
-				defer s.wg.Done()
-				defer s.sem.Release(1)
+			bp := curChild.Bitfield.BitLen()
+			if preChild.Bitfield.BitLen() > bp {
+				bp = preChild.Bitfield.BitLen()
+			}
+			for idx := bp; idx >= 0; idx-- {
+				preBit := preChild.Bitfield.Bit(idx)
+				curBit := curChild.Bitfield.Bit(idx)
+				s.enqueueTask(&task{
+					idx:    idx,
+					pre:    preChild,
+					preBit: preBit,
+					cur:    curChild,
+					curBit: curBit,
+				})
+			}
 
-				idx := todo.idx
-				preBit := todo.preBit
-				pre := todo.pre
-				curBit := todo.curBit
-				cur := todo.cur
+		// check if KV's from cur exists in any children of pre's child.
+		case prePointer.isShard() && !curPointer.isShard():
+			childKV, err := prePointer.loadChildKVs(ctx, pre.store, pre.bitWidth, pre.hash)
+			if err != nil {
+				return err
+			}
+			parallelDiffKVs(childKV, curPointer.KVs, results)
 
-				switch {
-				case preBit == 1 && curBit == 1:
-					// index for pre and cur will be unique to each, calculate it here.
-					prePointer := pre.getPointer(byte(pre.indexForBitPos(idx)))
-					curPointer := cur.getPointer(byte(cur.indexForBitPos(idx)))
-					switch {
-					// both pointers are shards, recurse down the tree.
-					case prePointer.isShard() && curPointer.isShard():
-						preChild, err := prePointer.loadChild(ctx, pre.store, pre.bitWidth, pre.hash)
-						if err != nil {
-							return err
-						}
-						curChild, err := curPointer.loadChild(ctx, cur.store, cur.bitWidth, cur.hash)
-						if err != nil {
-							return err
-						}
+		// check if KV's from pre exists in any children of cur's child.
+		case !prePointer.isShard() && curPointer.isShard():
+			childKV, err := curPointer.loadChildKVs(ctx, cur.store, cur.bitWidth, cur.hash)
+			if err != nil {
+				return err
+			}
+			parallelDiffKVs(prePointer.KVs, childKV, results)
 
-						bp := curChild.Bitfield.BitLen()
-						if preChild.Bitfield.BitLen() > bp {
-							bp = preChild.Bitfield.BitLen()
-						}
-						for idx := bp; idx >= 0; idx-- {
-							preBit := preChild.Bitfield.Bit(idx)
-							curBit := curChild.Bitfield.Bit(idx)
-							s.startTask(&task{
-								idx:    idx,
-								pre:    preChild,
-								preBit: preBit,
-								cur:    curChild,
-								curBit: curBit,
-							})
-						}
-
-					// check if KV's from cur exists in any children of pre's child.
-					case prePointer.isShard() && !curPointer.isShard():
-						childKV, err := prePointer.loadChildKVs(ctx, pre.store, pre.bitWidth, pre.hash)
-						if err != nil {
-							return err
-						}
-						parallelDiffKVs(childKV, curPointer.KVs, outCh)
-
-					// check if KV's from pre exists in any children of cur's child.
-					case !prePointer.isShard() && curPointer.isShard():
-						childKV, err := curPointer.loadChildKVs(ctx, cur.store, cur.bitWidth, cur.hash)
-						if err != nil {
-							return err
-						}
-						parallelDiffKVs(prePointer.KVs, childKV, outCh)
-
-					// both contain KVs, compare.
-					case !prePointer.isShard() && !curPointer.isShard():
-						parallelDiffKVs(prePointer.KVs, curPointer.KVs, outCh)
-					}
-				case preBit == 1 && curBit == 0:
-					// there exists a value in previous not found in current - it was removed
-					pointer := pre.getPointer(byte(pre.indexForBitPos(idx)))
-
-					if pointer.isShard() {
-						child, err := pointer.loadChild(ctx, pre.store, pre.bitWidth, pre.hash)
-						if err != nil {
-							return err
-						}
-						err = parallelRemoveAll(ctx, child, outCh)
-						if err != nil {
-							return err
-						}
-					} else {
-						for _, p := range pointer.KVs {
-							outCh <- &Change{
-								Type:   Remove,
-								Key:    string(p.Key),
-								Before: p.Value,
-								After:  nil,
-							}
-						}
-					}
-				case preBit == 0 && curBit == 1:
-					// there exists a value in current not found in previous - it was added
-					pointer := cur.getPointer(byte(cur.indexForBitPos(idx)))
-
-					if pointer.isShard() {
-						child, err := pointer.loadChild(ctx, pre.store, pre.bitWidth, pre.hash)
-						if err != nil {
-							return err
-						}
-						err = parallelAddAll(ctx, child, outCh)
-						if err != nil {
-							return err
-						}
-					} else {
-						for _, p := range pointer.KVs {
-							outCh <- &Change{
-								Type:   Add,
-								Key:    string(p.Key),
-								Before: nil,
-								After:  p.Value,
-							}
-						}
-					}
-				}
-				return nil
-			})
+		// both contain KVs, compare.
+		case !prePointer.isShard() && !curPointer.isShard():
+			parallelDiffKVs(prePointer.KVs, curPointer.KVs, results)
 		}
-		return nil
-	})
+	case preBit == 1 && curBit == 0:
+		// there exists a value in previous not found in current - it was removed
+		pointer := pre.getPointer(byte(pre.indexForBitPos(idx)))
+
+		if pointer.isShard() {
+			child, err := pointer.loadChild(ctx, pre.store, pre.bitWidth, pre.hash)
+			if err != nil {
+				return err
+			}
+			err = parallelRemoveAll(ctx, child, results)
+			if err != nil {
+				return err
+			}
+		} else {
+			for _, p := range pointer.KVs {
+				results <- &Change{
+					Type:   Remove,
+					Key:    string(p.Key),
+					Before: p.Value,
+					After:  nil,
+				}
+			}
+		}
+	case preBit == 0 && curBit == 1:
+		// there exists a value in current not found in previous - it was added
+		pointer := cur.getPointer(byte(cur.indexForBitPos(idx)))
+
+		if pointer.isShard() {
+			child, err := pointer.loadChild(ctx, pre.store, pre.bitWidth, pre.hash)
+			if err != nil {
+				return err
+			}
+			err = parallelAddAll(ctx, child, results)
+			if err != nil {
+				return err
+			}
+		} else {
+			for _, p := range pointer.KVs {
+				results <- &Change{
+					Type:   Add,
+					Key:    string(p.Key),
+					Before: nil,
+					After:  p.Value,
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func parallelDiffKVs(pre, cur []*KV, out chan *Change) {
