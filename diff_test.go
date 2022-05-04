@@ -334,7 +334,7 @@ func bigDiff(t *testing.T, scale int) {
 }
 
 func TestBigDiff(t *testing.T) {
-	scales := []int{1, 2, 4, 8, 16, 32, 64, 128, 256, 512}
+	scales := []int{1, 2, 4, 8, 16, 32, 64}
 	for _, scale := range scales {
 		t.Run(fmt.Sprintf("BigDIff Scale %d", scale), func(t *testing.T) {
 			bigDiff(t, scale)
