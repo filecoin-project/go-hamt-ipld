@@ -63,20 +63,17 @@ func doParallelDiffNode(ctx context.Context, pre, cur *Node, workers int64) ([]*
 	var changes []*Change
 	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		for change := range out {
 			changes = append(changes, change)
 		}
-		close(done)
 	}()
 
-	if err := differ.grp.Wait(); err != nil {
-		close(out)
-		return nil, err
-	}
+	err := differ.grp.Wait()
 	close(out)
 	<-done
 
-	return changes, nil
+	return changes, err
 }
 
 type task struct {
@@ -126,13 +123,10 @@ func (s *diffScheduler) startTask(task *task) {
 
 func (s *diffScheduler) startScheduler(ctx context.Context) {
 	s.grp.Go(func() error {
-		defer func() {
-			close(s.out)
-		}()
-		done := make(chan struct{})
+		defer close(s.out)
 		go func() {
 			s.wg.Wait()
-			close(done)
+			close(s.in)
 		}()
 		for {
 			select {
@@ -142,20 +136,22 @@ func (s *diffScheduler) startScheduler(ctx context.Context) {
 			}
 			if n := len(s.stack) - 1; n >= 0 {
 				select {
-				case newJob := <-s.in:
+				case newJob, ok := <-s.in:
+					if !ok {
+						return nil
+					}
 					s.stack = append(s.stack, newJob)
 				case s.out <- s.stack[n]:
 					s.stack[n] = nil
 					s.stack = s.stack[:n]
-				case <-done:
-					return nil
 				}
 			} else {
 				select {
-				case newJob := <-s.in:
+				case newJob, ok := <-s.in:
+					if !ok {
+						return nil
+					}
 					s.stack = append(s.stack, newJob)
-				case <-done:
-					return nil
 				}
 			}
 		}
