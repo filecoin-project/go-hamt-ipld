@@ -10,6 +10,7 @@ import (
 	"math/rand"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -22,15 +23,18 @@ import (
 )
 
 type mockBlocks struct {
-	data  map[cid.Cid]block.Block
-	stats blockstoreStats
+	data   map[cid.Cid]block.Block
+	dataMu sync.Mutex
+	stats  blockstoreStats
 }
 
 func newMockBlocks() *mockBlocks {
-	return &mockBlocks{make(map[cid.Cid]block.Block), blockstoreStats{}}
+	return &mockBlocks{make(map[cid.Cid]block.Block), sync.Mutex{}, blockstoreStats{}}
 }
 
 func (mb *mockBlocks) Get(c cid.Cid) (block.Block, error) {
+	mb.dataMu.Lock()
+	defer mb.dataMu.Unlock()
 	mb.stats.evtcntGet++
 	d, ok := mb.data[c]
 	if ok {
@@ -40,6 +44,8 @@ func (mb *mockBlocks) Get(c cid.Cid) (block.Block, error) {
 }
 
 func (mb *mockBlocks) Put(b block.Block) error {
+	mb.dataMu.Lock()
+	defer mb.dataMu.Unlock()
 	mb.stats.evtcntPut++
 	if _, exists := mb.data[b.Cid()]; exists {
 		mb.stats.evtcntPutDup++
@@ -55,6 +61,8 @@ type blockstoreStats struct {
 }
 
 func (mb *mockBlocks) totalBlockSizes() int {
+	mb.dataMu.Lock()
+	defer mb.dataMu.Unlock()
 	sum := 0
 	for _, v := range mb.data {
 		sum += len(v.RawData())
@@ -65,6 +73,8 @@ func (mb *mockBlocks) totalBlockSizes() int {
 type blockSizesHistogram [12]int
 
 func (mb *mockBlocks) getBlockSizesHistogram() (h blockSizesHistogram) {
+	mb.dataMu.Lock()
+	defer mb.dataMu.Unlock()
 	for _, v := range mb.data {
 		l := len(v.RawData())
 		switch {

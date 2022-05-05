@@ -18,18 +18,18 @@ func TestSimpleEquals(t *testing.T) {
 	curBs := cbor.NewCborStore(newMockBlocks())
 	ctx := context.Background()
 
-	a, err := NewNode(prevBs)
+	prev, err := NewNode(prevBs)
 	assert.NoError(t, err)
 
-	b, err := NewNode(curBs)
+	cur, err := NewNode(curBs)
 	assert.NoError(t, err)
 
-	_ = diffAndAssertLength(ctx, t, prevBs, curBs, a, b, 0)
+	_ = diffAndAssertLength(ctx, t, prevBs, curBs, prev, cur, 0)
 
-	assertSet(t, a, 2, "foo")
-	assertSet(t, b, 2, "foo")
+	assertSet(t, prev, 2, "foo")
+	assertSet(t, cur, 2, "foo")
 
-	_ = diffAndAssertLength(ctx, t, prevBs, curBs, a, b, 0)
+	_ = diffAndAssertLength(ctx, t, prevBs, curBs, prev, cur, 0)
 }
 
 func TestSimpleAdd(t *testing.T) {
@@ -334,7 +334,7 @@ func bigDiff(t *testing.T, scale int) {
 }
 
 func TestBigDiff(t *testing.T) {
-	scales := []int{1, 2, 4, 8, 16, 32, 64, 128, 256, 512}
+	scales := []int{1, 2, 4, 8, 16, 32, 64}
 	for _, scale := range scales {
 		t.Run(fmt.Sprintf("BigDIff Scale %d", scale), func(t *testing.T) {
 			bigDiff(t, scale)
@@ -354,6 +354,15 @@ func diffAndAssertLength(ctx context.Context, t *testing.T, prevBs, curBs cbor.I
 	cs, err := diffNode(ctx, a, b, 0)
 	if err != nil {
 		t.Fatalf("unexpected error from diff: %v", err)
+	}
+
+	if len(cs) != expectedLength {
+		t.Fatalf("got %d changes, wanted %d", len(cs), expectedLength)
+	}
+
+	cs, err = doParallelDiffNode(ctx, a, b, 4096)
+	if err != nil {
+		t.Fatalf("unexpected error from parallel diff: %v", err)
 	}
 
 	if len(cs) != expectedLength {
