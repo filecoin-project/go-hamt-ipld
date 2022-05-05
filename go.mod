@@ -1,7 +1,6 @@
 module github.com/filecoin-project/go-hamt-ipld/v3
 
 require (
-	github.com/golang-collections/collections v0.0.0-20130729185459-604e922904d3
 	github.com/ipfs/go-block-format v0.0.2
 	github.com/ipfs/go-cid v0.0.6
 	github.com/ipfs/go-ipld-cbor v0.0.4
