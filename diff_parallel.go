@@ -89,14 +89,12 @@ func newDiffScheduler(ctx context.Context, numWorkers int64, rootTasks ...*task)
 	grp, ctx := errgroup.WithContext(ctx)
 	s := &diffScheduler{
 		numWorkers: numWorkers,
-		stack:      []*task{},
+		stack:      rootTasks,
 		in:         make(chan *task, numWorkers),
 		out:        make(chan *task, numWorkers),
-		workerWg:   &sync.WaitGroup{},
 		grp:        grp,
 	}
-	s.workerWg.Add(len(rootTasks))
-	s.stack = append(s.stack, rootTasks...)
+	s.taskWg.Add(len(rootTasks))
 	return s, ctx
 }
 
@@ -105,26 +103,35 @@ type diffScheduler struct {
 	numWorkers int64
 	// buffer holds tasks until they are processed
 	stack []*task
-	// tasks arrive here
-	in chan *task
-	// completed tasks exit here
-	out chan *task
+	// inbound and outbound tasks
+	in, out chan *task
 	// tracks number of inflight tasks
-	workerWg *sync.WaitGroup
+	taskWg sync.WaitGroup
 	// launches workers and collects errors if any occur
 	grp *errgroup.Group
 }
 
 func (s *diffScheduler) enqueueTask(task *task) {
-	s.workerWg.Add(1)
+	s.taskWg.Add(1)
 	s.in <- task
 }
 
 func (s *diffScheduler) startScheduler(ctx context.Context) {
 	s.grp.Go(func() error {
-		defer close(s.out)
+		defer func() {
+			close(s.out)
+			// Because the workers may have exited early (due to the context being canceled).
+			for range s.out {
+				s.taskWg.Done()
+			}
+			// Because the workers may have enqueued additional tasks.
+			for range s.in {
+				s.taskWg.Done()
+			}
+			// now, the waitgroup should be at 0, and the goroutine that was _waiting_ on it should have exited.
+		}()
 		go func() {
-			s.workerWg.Wait()
+			s.taskWg.Wait()
 			close(s.in)
 		}()
 		for {
@@ -170,7 +177,7 @@ func (s *diffScheduler) startWorkers(ctx context.Context, out chan *Change) {
 }
 
 func (s *diffScheduler) work(ctx context.Context, todo *task, results chan *Change) error {
-	defer s.workerWg.Done()
+	defer s.taskWg.Done()
 	idx := todo.idx
 	preBit := todo.preBit
 	pre := todo.pre
