@@ -16,19 +16,19 @@ func (t *Pointer) MarshalCBOR(w io.Writer) error {
 		return fmt.Errorf("hamt Pointer cannot have both a link and KVs")
 	}
 
-	scratch := make([]byte, 9)
+	cw := cbg.NewCborWriter(w)
 
 	if t.Link != cid.Undef {
-		if err := cbg.WriteCidBuf(scratch, w, t.Link); err != nil {
+		if err := cbg.WriteCid(cw, t.Link); err != nil {
 			return err
 		}
 	} else {
-		if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajArray, uint64(len(t.KVs))); err != nil {
+		if err := cw.WriteMajorTypeHeader(cbg.MajArray, uint64(len(t.KVs))); err != nil {
 			return err
 		}
 
 		for _, kv := range t.KVs {
-			if err := kv.MarshalCBOR(w); err != nil {
+			if err := kv.MarshalCBOR(cw); err != nil {
 				return err
 			}
 		}
@@ -37,10 +37,10 @@ func (t *Pointer) MarshalCBOR(w io.Writer) error {
 	return nil
 }
 
-func (t *Pointer) UnmarshalCBOR(br io.Reader) error {
-	scratch := make([]byte, 8)
+func (t *Pointer) UnmarshalCBOR(r io.Reader) error {
+	cr := cbg.NewCborReader(r)
 
-	maj, extra, err := cbg.CborReadHeaderBuf(br, scratch)
+	maj, extra, err := cr.ReadHeader()
 	if err != nil {
 		return err
 	}
@@ -50,7 +50,7 @@ func (t *Pointer) UnmarshalCBOR(br io.Reader) error {
 			return fmt.Errorf("expected tag 42 for child node link")
 		}
 
-		ba, err := cbg.ReadByteArray(br, 512)
+		ba, err := cbg.ReadByteArray(cr, 512)
 		if err != nil {
 			return err
 		}
@@ -72,7 +72,7 @@ func (t *Pointer) UnmarshalCBOR(br io.Reader) error {
 		t.KVs = make([]*KV, length)
 		for i := 0; i < int(length); i++ {
 			var kv KV
-			if err := kv.UnmarshalCBOR(br); err != nil {
+			if err := kv.UnmarshalCBOR(cr); err != nil {
 				return err
 			}
 

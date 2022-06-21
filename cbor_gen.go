@@ -29,7 +29,7 @@ func (t *Node) MarshalCBOR(w io.Writer) error {
 		return err
 	}
 
-	scratch := make([]byte, 9)
+	cw := cbg.NewCborWriter(w)
 
 	// t.Bitfield (big.Int) (struct)
 	{
@@ -38,7 +38,7 @@ func (t *Node) MarshalCBOR(w io.Writer) error {
 			b = t.Bitfield.Bytes()
 		}
 
-		if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajByteString, uint64(len(b))); err != nil {
+		if err := cw.WriteMajorTypeHeader(cbg.MajByteString, uint64(len(b))); err != nil {
 			return err
 		}
 		if _, err := w.Write(b); err != nil {
@@ -51,7 +51,7 @@ func (t *Node) MarshalCBOR(w io.Writer) error {
 		return xerrors.Errorf("Slice value in field t.Pointers was too long")
 	}
 
-	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajArray, uint64(len(t.Pointers))); err != nil {
+	if err := cw.WriteMajorTypeHeader(cbg.MajArray, uint64(len(t.Pointers))); err != nil {
 		return err
 	}
 	for _, v := range t.Pointers {
@@ -65,10 +65,9 @@ func (t *Node) MarshalCBOR(w io.Writer) error {
 func (t *Node) UnmarshalCBOR(r io.Reader) error {
 	*t = Node{}
 
-	br := cbg.GetPeeker(r)
-	scratch := make([]byte, 8)
+	cr := cbg.NewCborReader(r)
 
-	maj, extra, err := cbg.CborReadHeaderBuf(br, scratch)
+	maj, extra, err := cr.ReadHeader()
 	if err != nil {
 		return err
 	}
@@ -82,7 +81,7 @@ func (t *Node) UnmarshalCBOR(r io.Reader) error {
 
 	// t.Bitfield (big.Int) (struct)
 
-	maj, extra, err = cbg.CborReadHeaderBuf(br, scratch)
+	maj, extra, err = cr.ReadHeader()
 	if err != nil {
 		return err
 	}
@@ -97,7 +96,7 @@ func (t *Node) UnmarshalCBOR(r io.Reader) error {
 
 	if extra > 0 {
 		buf := make([]byte, extra)
-		if _, err := io.ReadFull(br, buf); err != nil {
+		if _, err := io.ReadFull(cr, buf); err != nil {
 			return err
 		}
 		t.Bitfield = big.NewInt(0).SetBytes(buf)
@@ -106,7 +105,7 @@ func (t *Node) UnmarshalCBOR(r io.Reader) error {
 	}
 	// t.Pointers ([]*hamt.Pointer) (slice)
 
-	maj, extra, err = cbg.CborReadHeaderBuf(br, scratch)
+	maj, extra, err = cr.ReadHeader()
 	if err != nil {
 		return err
 	}
@@ -126,7 +125,7 @@ func (t *Node) UnmarshalCBOR(r io.Reader) error {
 	for i := 0; i < int(extra); i++ {
 
 		var v Pointer
-		if err := v.UnmarshalCBOR(br); err != nil {
+		if err := v.UnmarshalCBOR(cr); err != nil {
 			return err
 		}
 
@@ -147,14 +146,14 @@ func (t *KV) MarshalCBOR(w io.Writer) error {
 		return err
 	}
 
-	scratch := make([]byte, 9)
+	cw := cbg.NewCborWriter(w)
 
 	// t.Key ([]uint8) (slice)
 	if len(t.Key) > cbg.ByteArrayMaxLen {
 		return xerrors.Errorf("Byte array in field t.Key was too long")
 	}
 
-	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajByteString, uint64(len(t.Key))); err != nil {
+	if err := cw.WriteMajorTypeHeader(cbg.MajByteString, uint64(len(t.Key))); err != nil {
 		return err
 	}
 
@@ -172,10 +171,9 @@ func (t *KV) MarshalCBOR(w io.Writer) error {
 func (t *KV) UnmarshalCBOR(r io.Reader) error {
 	*t = KV{}
 
-	br := cbg.GetPeeker(r)
-	scratch := make([]byte, 8)
+	cr := cbg.NewCborReader(r)
 
-	maj, extra, err := cbg.CborReadHeaderBuf(br, scratch)
+	maj, extra, err := cr.ReadHeader()
 	if err != nil {
 		return err
 	}
@@ -189,7 +187,7 @@ func (t *KV) UnmarshalCBOR(r io.Reader) error {
 
 	// t.Key ([]uint8) (slice)
 
-	maj, extra, err = cbg.CborReadHeaderBuf(br, scratch)
+	maj, extra, err = cr.ReadHeader()
 	if err != nil {
 		return err
 	}
@@ -205,7 +203,7 @@ func (t *KV) UnmarshalCBOR(r io.Reader) error {
 		t.Key = make([]byte, extra)
 	}
 
-	if _, err := io.ReadFull(br, t.Key[:]); err != nil {
+	if _, err := io.ReadFull(cr, t.Key[:]); err != nil {
 		return err
 	}
 	// t.Value (typegen.Deferred) (struct)
@@ -214,7 +212,7 @@ func (t *KV) UnmarshalCBOR(r io.Reader) error {
 
 		t.Value = new(cbg.Deferred)
 
-		if err := t.Value.UnmarshalCBOR(br); err != nil {
+		if err := t.Value.UnmarshalCBOR(cr); err != nil {
 			return xerrors.Errorf("failed to read deferred field: %w", err)
 		}
 	}
