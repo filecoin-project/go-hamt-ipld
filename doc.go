@@ -14,7 +14,7 @@ intermediate data insertion and deletion. Therefore, for any given set of keys
 and their values, a HAMT using the same parameters and CHAMP semantics, the
 root node should always produce the same content identifier (CID).
 
-Algorithm Overview
+# Algorithm Overview
 
 The HAMT algorithm hashes incoming keys and uses incrementing subsections of
 that hash digest at each level of its tree structure to determine the placement
@@ -39,7 +39,7 @@ elements a bucket is allowed to contain ("collisions"). In practice, indexes do
 not distribute with perfect randomness so this maximum is theoretical. Entries
 stored in the node's buckets are stored in key-sorted order.
 
-Parameters
+# Parameters
 
 This HAMT implementation:
 
@@ -49,7 +49,7 @@ This HAMT implementation:
 
 • Defaults the hash algorithm to the 64-bit variant of Murmur3-x64
 
-Further Reading
+# Further Reading
 
 The algorithm used here is identical to that of the IPLD HashMap algorithm
 specified at

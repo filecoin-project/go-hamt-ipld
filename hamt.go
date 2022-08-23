@@ -12,7 +12,7 @@ import (
 	cbg "github.com/whyrusleeping/cbor-gen"
 )
 
-//-----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // Boolean constants
 type overwrite bool
 
@@ -58,7 +58,9 @@ type HashFunc func([]byte) []byte
 
 // Node is a single point in the HAMT, encoded as an IPLD tuple in DAG-CBOR of
 // shape:
-//   [bytes, [Pointer...]]
+//
+//	[bytes, [Pointer...]]
+//
 // where 'bytes' is the big.Int#Bytes() and the Pointers array is between 1 and
 // `2^bitWidth`.
 //
@@ -74,10 +76,10 @@ type HashFunc func([]byte) []byte
 //
 // The IPLD Schema representation of this data structure is as follows:
 //
-// 		type Node struct {
-// 			bitfield Bytes
-// 			pointers [Pointer]
-// 		} representation tuple
+//	type Node struct {
+//		bitfield Bytes
+//		pointers [Pointer]
+//	} representation tuple
 type Node struct {
 	Bitfield *big.Int
 	Pointers []*Pointer
@@ -91,7 +93,9 @@ type Node struct {
 
 // Pointer is an element in a HAMT node's Pointers array, encoded as an IPLD
 // tuple in DAG-CBOR of shape:
-//   CID or [KV...]
+//
+//	CID or [KV...]
+//
 // i.e. it is represented as a "kinded union" where a Link is a pointer to a
 // child node, while an array is a bucket of elements local to this node. A
 // Pointer must represent exactly one of of these two states and cannot be both
@@ -106,12 +110,12 @@ type Node struct {
 //
 // The IPLD Schema representation of this data structure is as follows:
 //
-// 		type Pointer union {
-//			&Node link
-// 			Bucket list
-// 		} representation kinded
+//	type Pointer union {
+//		&Node link
+//		Bucket list
+//	} representation kinded
 //
-//		type Bucket [KV]
+//	type Bucket [KV]
 type Pointer struct {
 	KVs  []*KV
 	Link cid.Cid
@@ -152,10 +156,10 @@ type Pointer struct {
 //
 // The IPLD Schema representation of this data structure is as follows:
 //
-//		type KV struct {
-//			key Bytes
-//			value Any
-//		} representation tuple
+//	type KV struct {
+//		key Bytes
+//		value Any
+//	} representation tuple
 type KV struct {
 	Key   []byte
 	Value *cbg.Deferred
@@ -459,8 +463,10 @@ func (n *Node) checkSize(ctx context.Context) (uint64, error) {
 
 // Write is a convenience method that calls flush and writes the node to it's
 // internal store, returning the CID of the stored node. It is equivelant to:
-//   n.Flush
-//   store.Put(ctx, n)
+//
+//	n.Flush
+//	store.Put(ctx, n)
+//
 // where store is equal to the store provided to the node when constructed.
 //
 // write should only be called on the root node of a HAMT
