@@ -3,6 +3,7 @@ package hamt
 import (
 	"bytes"
 	"context"
+	crand "crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
@@ -126,13 +127,13 @@ func (h blockSizesHistogram) String() string {
 
 func randKey() string {
 	buf := make([]byte, 18)
-	rand.Read(buf)
+	crand.Read(buf)
 	return hex.EncodeToString(buf)
 }
 
 func randValue() *CborByteArray {
 	buf := CborByteArray(make([]byte, 30))
-	rand.Read(buf)
+	crand.Read(buf)
 	return &buf
 }
 
