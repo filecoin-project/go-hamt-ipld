@@ -2,6 +2,7 @@ package hamt
 
 import (
 	"context"
+	crand "crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"math/rand"
@@ -20,13 +21,13 @@ type rander struct {
 
 func (r *rander) randString() string {
 	buf := make([]byte, 18)
-	rand.Read(buf)
+	crand.Read(buf)
 	return hex.EncodeToString(buf)
 }
 
 func (r *rander) randValue() *CborByteArray {
 	buf := CborByteArray(make([]byte, 30))
-	rand.Read(buf)
+	crand.Read(buf)
 	return &buf
 }
 
