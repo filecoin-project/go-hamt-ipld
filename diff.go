@@ -80,6 +80,9 @@ func diffNode(ctx context.Context, pre, cur *Node, depth int) ([]*Change, error)
 
 			// both pointers are shards, recurse down the tree.
 			if prePointer.isShard() && curPointer.isShard() {
+				if prePointer.Link == curPointer.Link {
+					continue
+				}
 				preChild, err := prePointer.loadChild(ctx, pre.store, pre.bitWidth, pre.hash)
 				if err != nil {
 					return nil, err

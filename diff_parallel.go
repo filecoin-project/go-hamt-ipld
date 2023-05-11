@@ -192,6 +192,9 @@ func (s *diffScheduler) work(ctx context.Context, todo *task, results chan *Chan
 		switch {
 		// both pointers are shards, recurse down the tree.
 		case prePointer.isShard() && curPointer.isShard():
+			if prePointer.Link == curPointer.Link {
+				return nil
+			}
 			preChild, err := prePointer.loadChild(ctx, pre.store, pre.bitWidth, pre.hash)
 			if err != nil {
 				return err
