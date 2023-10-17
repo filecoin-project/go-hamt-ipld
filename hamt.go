@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"math/big"
 	"sort"
+	"sync"
+
+	"golang.org/x/sync/errgroup"
 
 	cid "github.com/ipfs/go-cid"
 	cbor "github.com/ipfs/go-ipld-cbor"
@@ -372,16 +375,27 @@ func loadNode(
 	out.bitWidth = bitWidth
 	out.hash = hashFunction
 
+	if err := validateNode(out, isRoot); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// validates a node
+func validateNode(
+	out Node,
+	isRoot bool,
+) error {
 	// Validation
 
 	// too many elements in the data array for the configured bitWidth?
 	if len(out.Pointers) > 1<<uint(out.bitWidth) {
-		return nil, ErrMalformedHamt
+		return ErrMalformedHamt
 	}
 
 	// the bifield is lying or the elements array is
 	if out.bitsSetCount() != len(out.Pointers) {
-		return nil, ErrMalformedHamt
+		return ErrMalformedHamt
 	}
 
 	for _, ch := range out.Pointers {
@@ -390,18 +404,18 @@ func loadNode(
 		if isLink == isBucket {
 			// Pointer#UnmarshalCBOR shouldn't allow this
 			// A node can only be one of link or bucket
-			return nil, ErrMalformedHamt
+			return ErrMalformedHamt
 		}
 		if isLink && ch.Link.Type() != cid.DagCBOR { // not dag-cbor
-			return nil, ErrMalformedHamt
+			return ErrMalformedHamt
 		}
 		if isBucket {
 			if len(ch.KVs) == 0 || len(ch.KVs) > bucketSize {
-				return nil, ErrMalformedHamt
+				return ErrMalformedHamt
 			}
 			for i := 1; i < len(ch.KVs); i++ {
 				if bytes.Compare(ch.KVs[i-1].Key, ch.KVs[i].Key) >= 0 {
-					return nil, ErrMalformedHamt
+					return ErrMalformedHamt
 				}
 			}
 		}
@@ -410,16 +424,16 @@ func loadNode(
 	if !isRoot {
 		// the only valid empty node is a root node
 		if len(out.Pointers) == 0 {
-			return nil, ErrMalformedHamt
+			return ErrMalformedHamt
 		}
 		// a non-root node that contains <=bucketSize direct elements should not
 		// exist under compaction rules
 		if out.directChildCount() == 0 && out.directKVCount() <= bucketSize {
-			return nil, ErrMalformedHamt
+			return ErrMalformedHamt
 		}
 	}
 
-	return &out, nil
+	return nil
 }
 
 // checkSize computes the total serialized size of the entire HAMT.
@@ -876,4 +890,187 @@ func (n *Node) ForEach(ctx context.Context, f func(k string, val *cbg.Deferred) 
 		}
 	}
 	return nil
+}
+
+// ForEachParallel calls function f on each k / val pair found in the HAMT.
+// This performs a full traversal of the graph and for large HAMTs can cause
+// a large number of loads from the underlying store.
+// The values are returned as raw bytes, not decoded.
+// Unlike ForEach this runs in parallel so passed callbacks should not conflict with each other
+func (n *Node) ForEachParallel(ctx context.Context, f func(k string, val *cbg.Deferred) error, concurrency int) error {
+	return parallelShardWalk(ctx, n, f, concurrency)
+}
+
+type child struct {
+	cid   cid.Cid
+	shard *Node
+}
+
+type listCidsAndShards struct {
+	children []child
+}
+
+func (n *Node) walkChildren(f func(k string, val *cbg.Deferred) error) (*listCidsAndShards, error) {
+	res := &listCidsAndShards{}
+	res.children = make([]child, 0, len(n.Pointers))
+
+	for _, p := range n.Pointers {
+		if p.isShard() {
+			if p.cache != nil {
+				res.children = append(res.children, child{
+					shard: p.cache,
+				})
+			} else if p.Link != cid.Undef {
+				res.children = append(res.children, child{
+					cid: p.Link,
+				})
+			} else {
+				continue
+			}
+		} else {
+			for _, kv := range p.KVs {
+				if err := f(string(kv.Key), kv.Value); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+
+	return res, nil
+}
+
+// parallelShardWalk walks the HAMT concurrently processing callbacks upon encountering leaf nodes
+func parallelShardWalk(ctx context.Context, root *Node, processShardValues func(k string, val *cbg.Deferred) error, concurrency int) error {
+	var visitlk sync.Mutex
+	visitSet := cid.NewSet()
+	visit := visitSet.Visit
+
+	// Setup synchronization
+	grp, errGrpCtx := errgroup.WithContext(ctx)
+
+	// Input and output queues for workers.
+	feed := make(chan *listCidsAndShards)
+	out := make(chan *listCidsAndShards)
+	done := make(chan struct{})
+
+	for i := 0; i < concurrency; i++ {
+		grp.Go(func() error {
+			for feedChildren := range feed {
+				linksToVisit := make([]cid.Cid, 0, len(feedChildren.children))
+				for _, nextChild := range feedChildren.children {
+					if nextChild.shard != nil {
+						nextChildren, err := nextChild.shard.walkChildren(processShardValues)
+						if err != nil {
+							return err
+						}
+						select {
+						case out <- nextChildren:
+						case <-errGrpCtx.Done():
+							return nil
+						}
+					} else if nextChild.cid != cid.Undef {
+						var shouldVisit bool
+
+						visitlk.Lock()
+						shouldVisit = visit(nextChild.cid)
+						visitlk.Unlock()
+
+						if shouldVisit {
+							linksToVisit = append(linksToVisit, nextChild.cid)
+						}
+					} else {
+						return fmt.Errorf("invalid child")
+					}
+				}
+
+				// TODO: allow for Pointer caching
+				dserv := root.store.(cbor.IpldBatchOpStore)
+				nodes := make([]interface{}, len(linksToVisit))
+				for i := 0; i < len(linksToVisit); i++ {
+					nodes[i] = new(Node)
+				}
+				cursorChan, missingCIDs, err := dserv.GetMany(errGrpCtx, linksToVisit, nodes)
+				if err != nil {
+					return err
+				}
+				if len(missingCIDs) != 0 {
+					return fmt.Errorf("GetMany returned an incomplete result set. The set is missing these CIDs: %+v", missingCIDs)
+				}
+				for cursor := range cursorChan {
+					if cursor.Err != nil {
+						return cursor.Err
+					}
+					nextShard := nodes[cursor.Index].(*Node)
+					nextShard.store = root.store
+					nextShard.bitWidth = root.bitWidth
+					nextShard.hash = root.hash
+					if err := validateNode(*nextShard, false); err != nil {
+						return err
+					}
+
+					nextChildren, err := nextShard.walkChildren(processShardValues)
+					if err != nil {
+						return err
+					}
+
+					select {
+					case out <- nextChildren:
+					case <-errGrpCtx.Done():
+						return nil
+					}
+				}
+
+				select {
+				case done <- struct{}{}:
+				case <-errGrpCtx.Done():
+				}
+			}
+			return nil
+		})
+	}
+
+	send := feed
+	var todoQueue []*listCidsAndShards
+	var inProgress int
+
+	// start the walk
+	children, err := root.walkChildren(processShardValues)
+	// if we hit an error or there are no children, then we're done
+	if err != nil || children == nil {
+		close(feed)
+		grp.Wait()
+		return err
+	}
+	next := children
+
+dispatcherLoop:
+	for {
+		select {
+		case send <- next:
+			inProgress++
+			if len(todoQueue) > 0 {
+				next = todoQueue[0]
+				todoQueue = todoQueue[1:]
+			} else {
+				next = nil
+				send = nil
+			}
+		case <-done:
+			inProgress--
+			if inProgress == 0 && next == nil {
+				break dispatcherLoop
+			}
+		case nextNodes := <-out:
+			if next == nil {
+				next = nextNodes
+				send = feed
+			} else {
+				todoQueue = append(todoQueue, nextNodes)
+			}
+		case <-errGrpCtx.Done():
+			break dispatcherLoop
+		}
+	}
+	close(feed)
+	return grp.Wait()
 }
