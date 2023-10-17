@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -33,7 +34,7 @@ func newMockBlocks() *mockBlocks {
 	return &mockBlocks{make(map[cid.Cid]block.Block), sync.Mutex{}, blockstoreStats{}}
 }
 
-func (mb *mockBlocks) Get(c cid.Cid) (block.Block, error) {
+func (mb *mockBlocks) Get(ctx context.Context, c cid.Cid) (block.Block, error) {
 	mb.dataMu.Lock()
 	defer mb.dataMu.Unlock()
 	mb.stats.evtcntGet++
@@ -44,7 +45,24 @@ func (mb *mockBlocks) Get(c cid.Cid) (block.Block, error) {
 	return nil, fmt.Errorf("Not Found")
 }
 
-func (mb *mockBlocks) Put(b block.Block) error {
+func (mb *mockBlocks) GetMany(ctx context.Context, cs []cid.Cid) ([]block.Block, []cid.Cid, error) {
+	mb.dataMu.Lock()
+	defer mb.dataMu.Unlock()
+	blocks := make([]block.Block, 0, len(cs))
+	missingCIDs := make([]cid.Cid, 0, len(cs))
+	for _, c := range cs {
+		mb.stats.evtcntGet++
+		d, ok := mb.data[c]
+		if !ok {
+			missingCIDs = append(missingCIDs, c)
+		} else {
+			blocks = append(blocks, d)
+		}
+	}
+	return blocks, missingCIDs, nil
+}
+
+func (mb *mockBlocks) Put(ctx context.Context, b block.Block) error {
 	mb.dataMu.Lock()
 	defer mb.dataMu.Unlock()
 	mb.stats.evtcntPut++
@@ -52,6 +70,19 @@ func (mb *mockBlocks) Put(b block.Block) error {
 		mb.stats.evtcntPutDup++
 	}
 	mb.data[b.Cid()] = b
+	return nil
+}
+
+func (mb *mockBlocks) PutMany(ctx context.Context, bs []block.Block) error {
+	mb.dataMu.Lock()
+	defer mb.dataMu.Unlock()
+	for _, b := range bs {
+		mb.stats.evtcntPut++
+		if _, exists := mb.data[b.Cid()]; exists {
+			mb.stats.evtcntPutDup++
+		}
+		mb.data[b.Cid()] = b
+	}
 	return nil
 }
 
@@ -560,6 +591,129 @@ func testBasic(t *testing.T, options ...Option) {
 	if !bytes.Equal(out, *val) {
 		t.Fatal("out bytes were wrong: ", out)
 	}
+}
+
+func TestForEach(t *testing.T) {
+	testForEach(t)
+	testForEachParallel(t)
+}
+
+func testForEach(t *testing.T, options ...Option) {
+	ctx := context.Background()
+	cs := cbor.NewCborStore(newMockBlocks())
+	begn, err := NewNode(cs, options...)
+	require.NoError(t, err)
+
+	val := cborstr("cat dog bear")
+	valueBuf := new(bytes.Buffer)
+	err = val.MarshalCBOR(valueBuf)
+	require.NoError(t, err)
+	err = begn.Set(ctx, "foo", val)
+	require.NoError(t, err)
+
+	kvs := make(map[string][]byte, 1001)
+	kvs["foo"] = valueBuf.Bytes()
+
+	for i := 0; i < 1000; i++ {
+		k := randKey()
+		v := randValue()
+		valueBuf := new(bytes.Buffer)
+		err := v.MarshalCBOR(valueBuf)
+		require.NoError(t, err)
+		err = begn.Set(ctx, k, v)
+		require.NoError(t, err)
+		kvs[k] = valueBuf.Bytes()
+	}
+	require.NoError(t, begn.Flush(ctx))
+
+	called := 0
+	f := func(key string, val *cbg.Deferred) error {
+		called++
+		expectedVal, ok := kvs[key]
+		require.True(t, ok)
+		require.Equal(t, expectedVal, val.Raw)
+		return nil
+	}
+
+	err = begn.ForEach(ctx, f)
+	require.NoError(t, err)
+	require.Equal(t, 1001, called)
+}
+
+func testForEachParallel(t *testing.T, options ...Option) {
+	ctx := context.Background()
+	cs := cbor.NewGetManyCborStore(newMockBlocks())
+	begn, err := NewNode(cs, options...)
+	require.NoError(t, err)
+
+	val := cborstr("cat dog bear")
+	valueBuf := new(bytes.Buffer)
+	err = val.MarshalCBOR(valueBuf)
+	require.NoError(t, err)
+	err = begn.Set(ctx, "foo", val)
+	require.NoError(t, err)
+
+	kvs := make(map[string][]byte, 10001)
+	kvs["foo"] = valueBuf.Bytes()
+
+	for i := 0; i < 10000; i++ {
+		k := randKey()
+		v := randValue()
+		valueBuf := new(bytes.Buffer)
+		err := v.MarshalCBOR(valueBuf)
+		require.NoError(t, err)
+		err = begn.Set(ctx, k, v)
+		require.NoError(t, err)
+		kvs[k] = valueBuf.Bytes()
+	}
+	// test before flushing
+	var called uint64 = 0
+	f := func(key string, val *cbg.Deferred) error {
+		atomic.AddUint64(&called, 1)
+		expectedVal, ok := kvs[key]
+		require.True(t, ok)
+		require.Equal(t, expectedVal, val.Raw)
+		return nil
+	}
+
+	err = begn.ForEachParallel(ctx, f, 16)
+	require.NoError(t, err)
+	require.Equal(t, uint64(10001), called)
+
+	require.NoError(t, begn.Flush(ctx))
+	c, err := cs.Put(ctx, begn)
+	require.NoError(t, err)
+
+	// test after flushing
+	called = 0
+	f = func(key string, val *cbg.Deferred) error {
+		atomic.AddUint64(&called, 1)
+		expectedVal, ok := kvs[key]
+		require.True(t, ok)
+		require.Equal(t, expectedVal, val.Raw)
+		return nil
+	}
+
+	err = begn.ForEachParallel(ctx, f, 16)
+	require.NoError(t, err)
+	require.Equal(t, uint64(10001), called)
+
+	loadedRoot, err := LoadNode(ctx, cs, c)
+	require.NoError(t, err)
+
+	// test with loaded root
+	called = 0
+	f = func(key string, val *cbg.Deferred) error {
+		atomic.AddUint64(&called, 1)
+		expectedVal, ok := kvs[key]
+		require.True(t, ok)
+		require.Equal(t, expectedVal, val.Raw)
+		return nil
+	}
+
+	err = loadedRoot.ForEachParallel(ctx, f, 16)
+	require.NoError(t, err)
+	require.Equal(t, uint64(10001), called)
 }
 
 func TestSetIfAbsent(t *testing.T) {
