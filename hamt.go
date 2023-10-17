@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"golang.org/x/sync/errgroup"
 	"math/big"
 	"sort"
 	"sync"
+
+	"golang.org/x/sync/errgroup"
 
 	cid "github.com/ipfs/go-cid"
 	cbor "github.com/ipfs/go-ipld-cbor"
@@ -896,35 +897,35 @@ func (n *Node) ForEach(ctx context.Context, f func(k string, val *cbg.Deferred) 
 // a large number of loads from the underlying store.
 // The values are returned as raw bytes, not decoded.
 // Unlike ForEach this runs in parallel so passed callbacks should not conflict with each other
-func (n *Node) ForEachParallel(ctx context.Context, f func(k string, val *cbg.Deferred) error) error {
-	return parallelShardWalk(ctx, n, f)
+func (n *Node) ForEachParallel(ctx context.Context, f func(k string, val *cbg.Deferred) error, concurrency int) error {
+	return parallelShardWalk(ctx, n, f, concurrency)
 }
 
-type OptionalInteger struct {
-	Value int
-	Error error
-}
-
-// TODO: This interface is obviously wrong, but we may want some GetMany-style grouping or even a "session" object
-// we can push CIDs into to leverage efficiencies without tons of goroutines
-type getManyIPLDStore interface {
-	GetMany(ctx context.Context, cids []cid.Cid, outs []interface{}) <-chan *OptionalInteger
+type child struct {
+	cid   cid.Cid
+	shard *Node
 }
 
 type listCidsAndShards struct {
-	cids   []cid.Cid
-	shards []*Node
+	children []child
 }
 
 func (n *Node) walkChildren(f func(k string, val *cbg.Deferred) error) (*listCidsAndShards, error) {
 	res := &listCidsAndShards{}
+	res.children = make([]child, 0, len(n.Pointers))
 
 	for _, p := range n.Pointers {
 		if p.isShard() {
 			if p.cache != nil {
-				res.shards = append(res.shards, p.cache)
+				res.children = append(res.children, child{
+					shard: p.cache,
+				})
+			} else if p.Link != cid.Undef {
+				res.children = append(res.children, child{
+					cid: p.Link,
+				})
 			} else {
-				res.cids = append(res.cids, p.Link)
+				continue
 			}
 		} else {
 			for _, kv := range p.KVs {
@@ -939,9 +940,7 @@ func (n *Node) walkChildren(f func(k string, val *cbg.Deferred) error) (*listCid
 }
 
 // parallelShardWalk walks the HAMT concurrently processing callbacks upon encountering leaf nodes
-func parallelShardWalk(ctx context.Context, root *Node, processShardValues func(k string, val *cbg.Deferred) error) error {
-	const concurrency = 16 // TODO: should be an option, also this number was basically made up with a bit of empirical testing/usage
-
+func parallelShardWalk(ctx context.Context, root *Node, processShardValues func(k string, val *cbg.Deferred) error, concurrency int) error {
 	var visitlk sync.Mutex
 	visitSet := cid.NewSet()
 	visit := visitSet.Visit
@@ -957,44 +956,51 @@ func parallelShardWalk(ctx context.Context, root *Node, processShardValues func(
 	for i := 0; i < concurrency; i++ {
 		grp.Go(func() error {
 			for feedChildren := range feed {
-				for _, nextShard := range feedChildren.shards {
-					nextChildren, err := nextShard.walkChildren(processShardValues)
-					if err != nil {
-						return err
-					}
+				linksToVisit := make([]cid.Cid, 0, len(feedChildren.children))
+				for _, nextChild := range feedChildren.children {
+					if nextChild.shard != nil {
+						nextChildren, err := nextChild.shard.walkChildren(processShardValues)
+						if err != nil {
+							return err
+						}
+						select {
+						case out <- nextChildren:
+						case <-errGrpCtx.Done():
+							return nil
+						}
+					} else if nextChild.cid != cid.Undef {
+						var shouldVisit bool
 
-					select {
-					case out <- nextChildren:
-					case <-errGrpCtx.Done():
-						return nil
-					}
-				}
+						visitlk.Lock()
+						shouldVisit = visit(nextChild.cid)
+						visitlk.Unlock()
 
-				var linksToVisit []cid.Cid
-				for _, nextCid := range feedChildren.cids {
-					var shouldVisit bool
-
-					visitlk.Lock()
-					shouldVisit = visit(nextCid)
-					visitlk.Unlock()
-
-					if shouldVisit {
-						linksToVisit = append(linksToVisit, nextCid)
+						if shouldVisit {
+							linksToVisit = append(linksToVisit, nextChild.cid)
+						}
+					} else {
+						return fmt.Errorf("invalid child")
 					}
 				}
 
 				// TODO: allow for Pointer caching
-				dserv := root.store.(getManyIPLDStore)
+				dserv := root.store.(cbor.IpldBatchOpStore)
 				nodes := make([]interface{}, len(linksToVisit))
 				for i := 0; i < len(linksToVisit); i++ {
 					nodes[i] = new(Node)
 				}
-				chNodes := dserv.GetMany(errGrpCtx, linksToVisit, nodes)
-				for optNode := range chNodes {
-					if optNode.Error != nil {
-						return optNode.Error
+				cursorChan, missingCIDs, err := dserv.GetMany(errGrpCtx, linksToVisit, nodes)
+				if err != nil {
+					return err
+				}
+				if len(missingCIDs) != 0 {
+					return fmt.Errorf("GetMany returned an incomplete result set. The set is missing these CIDs: %+v", missingCIDs)
+				}
+				for cursor := range cursorChan {
+					if cursor.Err != nil {
+						return cursor.Err
 					}
-					nextShard := nodes[optNode.Value].(*Node)
+					nextShard := nodes[cursor.Index].(*Node)
 					nextShard.store = root.store
 					nextShard.bitWidth = root.bitWidth
 					nextShard.hash = root.hash
@@ -1027,9 +1033,15 @@ func parallelShardWalk(ctx context.Context, root *Node, processShardValues func(
 	var todoQueue []*listCidsAndShards
 	var inProgress int
 
-	next := &listCidsAndShards{
-		shards: []*Node{root},
+	// start the walk
+	children, err := root.walkChildren(processShardValues)
+	// if we hit an error or there are no children, then we're done
+	if err != nil || children == nil {
+		close(feed)
+		grp.Wait()
+		return err
 	}
+	next := children
 
 dispatcherLoop:
 	for {
