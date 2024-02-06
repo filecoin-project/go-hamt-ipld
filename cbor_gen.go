@@ -5,10 +5,13 @@ package hamt
 import (
 	"fmt"
 	"io"
-	"math/big"
+	"math"
+	"sort"
 
+	cid "github.com/ipfs/go-cid"
 	cbg "github.com/whyrusleeping/cbor-gen"
 	xerrors "golang.org/x/xerrors"
+	big "math/big"
 )
 
 // NOTE: This is a generated file, but it has been modified to encode the
@@ -17,6 +20,9 @@ import (
 // is fundamentally an array of bytes (bits)
 
 var _ = xerrors.Errorf
+var _ = cid.Undef
+var _ = math.E
+var _ = sort.Sort
 
 var lengthBufNode = []byte{130}
 
@@ -25,11 +31,12 @@ func (t *Node) MarshalCBOR(w io.Writer) error {
 		_, err := w.Write(cbg.CborNull)
 		return err
 	}
-	if _, err := w.Write(lengthBufNode); err != nil {
-		return err
-	}
 
 	cw := cbg.NewCborWriter(w)
+
+	if _, err := cw.Write(lengthBufNode); err != nil {
+		return err
+	}
 
 	// t.Bitfield (big.Int) (struct)
 	{
@@ -38,16 +45,16 @@ func (t *Node) MarshalCBOR(w io.Writer) error {
 			b = t.Bitfield.Bytes()
 		}
 
-		if err := cw.WriteMajorTypeHeader(cbg.MajByteString, uint64(len(b))); err != nil {
+		if err := cw.CborWriteHeader(cbg.MajByteString, uint64(len(b))); err != nil {
 			return err
 		}
-		if _, err := w.Write(b); err != nil {
+		if _, err := cw.Write(b); err != nil {
 			return err
 		}
 	}
 
 	// t.Pointers ([]*hamt.Pointer) (slice)
-	if len(t.Pointers) > cbg.MaxLength {
+	if len(t.Pointers) > 8192 {
 		return xerrors.Errorf("Slice value in field t.Pointers was too long")
 	}
 
@@ -55,14 +62,15 @@ func (t *Node) MarshalCBOR(w io.Writer) error {
 		return err
 	}
 	for _, v := range t.Pointers {
-		if err := v.MarshalCBOR(w); err != nil {
+		if err := v.MarshalCBOR(cw); err != nil {
 			return err
 		}
+
 	}
 	return nil
 }
 
-func (t *Node) UnmarshalCBOR(r io.Reader) error {
+func (t *Node) UnmarshalCBOR(r io.Reader) (err error) {
 	*t = Node{}
 
 	cr := cbg.NewCborReader(r)
@@ -71,6 +79,12 @@ func (t *Node) UnmarshalCBOR(r io.Reader) error {
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if err == io.EOF {
+			err = io.ErrUnexpectedEOF
+		}
+	}()
+
 	if maj != cbg.MajArray {
 		return fmt.Errorf("cbor input should be of type array")
 	}
@@ -110,7 +124,7 @@ func (t *Node) UnmarshalCBOR(r io.Reader) error {
 		return err
 	}
 
-	if extra > cbg.MaxLength {
+	if extra > 8192 {
 		return fmt.Errorf("t.Pointers: array too large (%d)", extra)
 	}
 
@@ -142,14 +156,15 @@ func (t *KV) MarshalCBOR(w io.Writer) error {
 		_, err := w.Write(cbg.CborNull)
 		return err
 	}
-	if _, err := w.Write(lengthBufKV); err != nil {
-		return err
-	}
 
 	cw := cbg.NewCborWriter(w)
 
+	if _, err := cw.Write(lengthBufKV); err != nil {
+		return err
+	}
+
 	// t.Key ([]uint8) (slice)
-	if len(t.Key) > cbg.ByteArrayMaxLen {
+	if len(t.Key) > 2097152 {
 		return xerrors.Errorf("Byte array in field t.Key was too long")
 	}
 
@@ -157,18 +172,18 @@ func (t *KV) MarshalCBOR(w io.Writer) error {
 		return err
 	}
 
-	if _, err := w.Write(t.Key[:]); err != nil {
+	if _, err := cw.Write(t.Key); err != nil {
 		return err
 	}
 
 	// t.Value (typegen.Deferred) (struct)
-	if err := t.Value.MarshalCBOR(w); err != nil {
+	if err := t.Value.MarshalCBOR(cw); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (t *KV) UnmarshalCBOR(r io.Reader) error {
+func (t *KV) UnmarshalCBOR(r io.Reader) (err error) {
 	*t = KV{}
 
 	cr := cbg.NewCborReader(r)
@@ -177,6 +192,12 @@ func (t *KV) UnmarshalCBOR(r io.Reader) error {
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if err == io.EOF {
+			err = io.ErrUnexpectedEOF
+		}
+	}()
+
 	if maj != cbg.MajArray {
 		return fmt.Errorf("cbor input should be of type array")
 	}
@@ -192,7 +213,7 @@ func (t *KV) UnmarshalCBOR(r io.Reader) error {
 		return err
 	}
 
-	if extra > cbg.ByteArrayMaxLen {
+	if extra > 2097152 {
 		return fmt.Errorf("t.Key: byte array too large (%d)", extra)
 	}
 	if maj != cbg.MajByteString {
@@ -200,12 +221,13 @@ func (t *KV) UnmarshalCBOR(r io.Reader) error {
 	}
 
 	if extra > 0 {
-		t.Key = make([]byte, extra)
+		t.Key = make([]uint8, extra)
 	}
 
-	if _, err := io.ReadFull(cr, t.Key[:]); err != nil {
+	if _, err := io.ReadFull(cr, t.Key); err != nil {
 		return err
 	}
+
 	// t.Value (typegen.Deferred) (struct)
 
 	{
