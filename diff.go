@@ -1,13 +1,11 @@
 package hamt
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 
 	"github.com/ipfs/go-cid"
 	cbor "github.com/ipfs/go-ipld-cbor"
-	cbg "github.com/whyrusleeping/cbor-gen"
 	"golang.org/x/xerrors"
 )
 
@@ -23,30 +21,30 @@ const (
 
 // Change represents a change to a DAG and contains a reference to the old and
 // new CIDs.
-type Change struct {
+type Change[T HamtValue[T]] struct {
 	Type   ChangeType
 	Key    string
-	Before *cbg.Deferred
-	After  *cbg.Deferred
+	Before *T
+	After  *T
 }
 
-func (ch Change) String() string {
+func (ch Change[T]) String() string {
 	b, _ := json.Marshal(ch)
 	return string(b)
 }
 
 // Diff returns a set of changes that transform node 'prev' into node 'cur'. opts are applied to both prev and cur.
-func Diff(ctx context.Context, prevBs, curBs cbor.IpldStore, prev, cur cid.Cid, opts ...Option) ([]*Change, error) {
+func Diff[T HamtValue[T]](ctx context.Context, prevBs, curBs cbor.IpldStore, prev, cur cid.Cid, opts ...Option) ([]*Change[T], error) {
 	if prev.Equals(cur) {
 		return nil, nil
 	}
 
-	prevHamt, err := LoadNode(ctx, prevBs, prev, opts...)
+	prevHamt, err := LoadNode[T](ctx, prevBs, prev, opts...)
 	if err != nil {
 		return nil, err
 	}
 
-	curHamt, err := LoadNode(ctx, curBs, cur, opts...)
+	curHamt, err := LoadNode[T](ctx, curBs, cur, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +55,7 @@ func Diff(ctx context.Context, prevBs, curBs cbor.IpldStore, prev, cur cid.Cid, 
 	return diffNode(ctx, prevHamt, curHamt, 0)
 }
 
-func diffNode(ctx context.Context, pre, cur *Node, depth int) ([]*Change, error) {
+func diffNode[T HamtValue[T]](ctx context.Context, pre, cur *Node[T], depth int) ([]*Change[T], error) {
 	// which Bitfield contains the most bits. We will start a loop from this index, calling Bitfield.Bit(idx)
 	// on an out of range index will return zero.
 	bp := cur.Bitfield.BitLen()
@@ -66,7 +64,7 @@ func diffNode(ctx context.Context, pre, cur *Node, depth int) ([]*Change, error)
 	}
 
 	// the changes between cur and prev
-	var changes []*Change
+	var changes []*Change[T]
 
 	// loop over each bit in the bitfields
 	for idx := bp; idx >= 0; idx-- {
@@ -138,10 +136,10 @@ func diffNode(ctx context.Context, pre, cur *Node, depth int) ([]*Change, error)
 				changes = append(changes, rm...)
 			} else {
 				for _, p := range pointer.KVs {
-					changes = append(changes, &Change{
+					changes = append(changes, &Change[T]{
 						Type:   Remove,
 						Key:    string(p.Key),
-						Before: p.Value,
+						Before: &p.Value,
 						After:  nil,
 					})
 				}
@@ -162,11 +160,11 @@ func diffNode(ctx context.Context, pre, cur *Node, depth int) ([]*Change, error)
 				changes = append(changes, add...)
 			} else {
 				for _, p := range pointer.KVs {
-					changes = append(changes, &Change{
+					changes = append(changes, &Change[T]{
 						Type:   Add,
 						Key:    string(p.Key),
 						Before: nil,
-						After:  p.Value,
+						After:  &p.Value,
 					})
 				}
 			}
@@ -176,21 +174,21 @@ func diffNode(ctx context.Context, pre, cur *Node, depth int) ([]*Change, error)
 	return changes, nil
 }
 
-func diffKVs(pre, cur []*KV, idx int) []*Change {
-	preMap := make(map[string]*cbg.Deferred, len(pre))
-	curMap := make(map[string]*cbg.Deferred, len(cur))
-	var changes []*Change
+func diffKVs[T HamtValue[T]](pre, cur []*KV[T], idx int) []*Change[T] {
+	preMap := make(map[string]*T, len(pre))
+	curMap := make(map[string]*T, len(cur))
+	var changes []*Change[T]
 
 	for _, kv := range pre {
-		preMap[string(kv.Key)] = kv.Value
+		preMap[string(kv.Key)] = &kv.Value
 	}
 	for _, kv := range cur {
-		curMap[string(kv.Key)] = kv.Value
+		curMap[string(kv.Key)] = &kv.Value
 	}
 	// find removed keys: keys in pre and not in cur
 	for key, value := range preMap {
 		if _, ok := curMap[key]; !ok {
-			changes = append(changes, &Change{
+			changes = append(changes, &Change[T]{
 				Type:   Remove,
 				Key:    key,
 				Before: value,
@@ -202,15 +200,15 @@ func diffKVs(pre, cur []*KV, idx int) []*Change {
 	// find modified values: keys in cur and pre with different values
 	for key, curVal := range curMap {
 		if preVal, ok := preMap[key]; !ok {
-			changes = append(changes, &Change{
+			changes = append(changes, &Change[T]{
 				Type:   Add,
 				Key:    key,
 				Before: nil,
 				After:  curVal,
 			})
 		} else {
-			if !bytes.Equal(preVal.Raw, curVal.Raw) {
-				changes = append(changes, &Change{
+			if !(*preVal).Equal(*curVal) {
+				changes = append(changes, &Change[T]{
 					Type:   Modify,
 					Key:    key,
 					Before: preVal,
@@ -222,14 +220,14 @@ func diffKVs(pre, cur []*KV, idx int) []*Change {
 	return changes
 }
 
-func addAll(ctx context.Context, node *Node, idx int) ([]*Change, error) {
-	var changes []*Change
-	if err := node.ForEach(ctx, func(k string, val *cbg.Deferred) error {
-		changes = append(changes, &Change{
+func addAll[T HamtValue[T]](ctx context.Context, node *Node[T], idx int) ([]*Change[T], error) {
+	var changes []*Change[T]
+	if err := node.ForEach(ctx, func(k string, val T) error {
+		changes = append(changes, &Change[T]{
 			Type:   Add,
 			Key:    k,
 			Before: nil,
-			After:  val,
+			After:  &val,
 		})
 
 		return nil
@@ -239,13 +237,13 @@ func addAll(ctx context.Context, node *Node, idx int) ([]*Change, error) {
 	return changes, nil
 }
 
-func removeAll(ctx context.Context, node *Node, idx int) ([]*Change, error) {
-	var changes []*Change
-	if err := node.ForEach(ctx, func(k string, val *cbg.Deferred) error {
-		changes = append(changes, &Change{
+func removeAll[T HamtValue[T]](ctx context.Context, node *Node[T], idx int) ([]*Change[T], error) {
+	var changes []*Change[T]
+	if err := node.ForEach(ctx, func(k string, val T) error {
+		changes = append(changes, &Change[T]{
 			Type:   Remove,
 			Key:    k,
-			Before: val,
+			Before: &val,
 			After:  nil,
 		})
 
