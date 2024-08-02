@@ -25,18 +25,18 @@ func (r *rander) randString() string {
 	return hex.EncodeToString(buf)
 }
 
-func (r *rander) randValue() **CborByteArray {
+func (r *rander) randValue() *CborByteArray {
 	buf := CborByteArray(make([]byte, 30))
 	crand.Read(buf)
 	v := &buf
-	return &v
+	return v
 }
 
 func BenchmarkSerializeNode(b *testing.B) {
 	r := rander{rand.New(rand.NewSource(1234))}
 
 	cs := cbor.NewCborStore(newMockBlocks())
-	n, err := NewNode[*CborByteArray](cs)
+	n, err := NewNode[CborByteArray](cs)
 	require.NoError(b, err)
 
 	for i := 0; i < 50; i++ {
@@ -57,7 +57,7 @@ func BenchmarkGetNode(b *testing.B) {
 	r := rander{rand.New(rand.NewSource(1234))}
 
 	cs := cbor.NewCborStore(newMockBlocks())
-	n, err := NewNode[*CborByteArray](cs)
+	n, err := NewNode[CborByteArray](cs)
 	require.NoError(b, err)
 
 	for i := 0; i < 100000; i++ {
@@ -72,7 +72,7 @@ func BenchmarkGetNode(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		var n Node[*CborByteArray]
+		var n Node[CborByteArray, *CborByteArray]
 		err := cs.Get(context.Background(), c, &n)
 		require.NoError(b, err)
 	}
@@ -143,7 +143,7 @@ func BenchmarkFill(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				r := rander{rand.New(rand.NewSource(int64(i)))}
 				blockstore := newMockBlocks()
-				n, err := NewNode[*CborByteArray](cbor.NewCborStore(blockstore), UseTreeBitWidth(t.bitwidth))
+				n, err := NewNode[CborByteArray](cbor.NewCborStore(blockstore), UseTreeBitWidth(t.bitwidth))
 				require.NoError(b, err)
 				// b.ResetTimer()
 				for j := 0; j < t.kcount*1000; j++ {
@@ -199,7 +199,7 @@ func doBenchmarkSetSuite(b *testing.B, flushPer bool) {
 			for i := 0; i < b.N; i++ {
 				r := rander{rand.New(rand.NewSource(int64(i)))}
 				blockstore := newMockBlocks()
-				n, err := NewNode[*CborByteArray](cbor.NewCborStore(blockstore), UseTreeBitWidth(t.bitwidth))
+				n, err := NewNode[CborByteArray](cbor.NewCborStore(blockstore), UseTreeBitWidth(t.bitwidth))
 				require.NoError(b, err)
 				// Initial fill:
 				for j := 0; j < t.kcount*1000; j++ {
@@ -251,7 +251,7 @@ func doBenchmarkEntriesCount(num int, bitWidth int) func(b *testing.B) {
 	return func(b *testing.B) {
 		blockstore := newMockBlocks()
 		cs := cbor.NewCborStore(blockstore)
-		n, err := NewNode[*CborByteArray](cs, UseTreeBitWidth(bitWidth))
+		n, err := NewNode[CborByteArray](cs, UseTreeBitWidth(bitWidth))
 		require.NoError(b, err)
 
 		var keys []string
@@ -272,7 +272,7 @@ func doBenchmarkEntriesCount(num int, bitWidth int) func(b *testing.B) {
 		b.ReportAllocs()
 
 		for i := 0; i < b.N; i++ {
-			nd, err := LoadNode[*CborByteArray](context.TODO(), cs, c, UseTreeBitWidth(bitWidth))
+			nd, err := LoadNode[CborByteArray](context.TODO(), cs, c, UseTreeBitWidth(bitWidth))
 			require.NoError(b, err)
 
 			found, _, err := nd.Find(context.TODO(), keys[i%num])

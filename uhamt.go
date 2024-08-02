@@ -12,7 +12,7 @@ import (
 // e.g. a Bitfield of `10010110000` shows that we have a 4 elements in the
 // associated array. Indexes `[1]` and `[2]` are not present, but index `[3]`
 // is at the second position of our Pointers array.
-func (n *Node[T]) indexForBitPos(bp int) int {
+func (n *Node[V, T]) indexForBitPos(bp int) int {
 	return indexForBitPos(bp, n.Bitfield)
 }
 
@@ -31,7 +31,7 @@ func indexForBitPos(bp int, bitfield *big.Int) int {
 }
 
 // How many elements does the bitfield say we should have? Count the ones.
-func (n *Node[T]) bitsSetCount() int {
+func (n *Node[V, T]) bitsSetCount() int {
 	w := n.Bitfield.Bits()
 	count := 0
 	for _, b := range w {

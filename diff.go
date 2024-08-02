@@ -21,30 +21,30 @@ const (
 
 // Change represents a change to a DAG and contains a reference to the old and
 // new CIDs.
-type Change[T HamtValue[T]] struct {
+type Change[V any] struct {
 	Type   ChangeType
 	Key    string
-	Before *T
-	After  *T
+	Before *V
+	After  *V
 }
 
-func (ch Change[T]) String() string {
+func (ch Change[V]) String() string {
 	b, _ := json.Marshal(ch)
 	return string(b)
 }
 
 // Diff returns a set of changes that transform node 'prev' into node 'cur'. opts are applied to both prev and cur.
-func Diff[T HamtValue[T]](ctx context.Context, prevBs, curBs cbor.IpldStore, prev, cur cid.Cid, opts ...Option) ([]*Change[T], error) {
+func Diff[V any, T HamtValue[V]](ctx context.Context, prevBs, curBs cbor.IpldStore, prev, cur cid.Cid, opts ...Option) ([]*Change[V], error) {
 	if prev.Equals(cur) {
 		return nil, nil
 	}
 
-	prevHamt, err := LoadNode[T](ctx, prevBs, prev, opts...)
+	prevHamt, err := LoadNode[V, T](ctx, prevBs, prev, opts...)
 	if err != nil {
 		return nil, err
 	}
 
-	curHamt, err := LoadNode[T](ctx, curBs, cur, opts...)
+	curHamt, err := LoadNode[V, T](ctx, curBs, cur, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +55,7 @@ func Diff[T HamtValue[T]](ctx context.Context, prevBs, curBs cbor.IpldStore, pre
 	return diffNode(ctx, prevHamt, curHamt, 0)
 }
 
-func diffNode[T HamtValue[T]](ctx context.Context, pre, cur *Node[T], depth int) ([]*Change[T], error) {
+func diffNode[V any, T HamtValue[V]](ctx context.Context, pre, cur *Node[V, T], depth int) ([]*Change[V], error) {
 	// which Bitfield contains the most bits. We will start a loop from this index, calling Bitfield.Bit(idx)
 	// on an out of range index will return zero.
 	bp := cur.Bitfield.BitLen()
@@ -64,7 +64,7 @@ func diffNode[T HamtValue[T]](ctx context.Context, pre, cur *Node[T], depth int)
 	}
 
 	// the changes between cur and prev
-	var changes []*Change[T]
+	var changes []*Change[V]
 
 	// loop over each bit in the bitfields
 	for idx := bp; idx >= 0; idx-- {
@@ -136,10 +136,10 @@ func diffNode[T HamtValue[T]](ctx context.Context, pre, cur *Node[T], depth int)
 				changes = append(changes, rm...)
 			} else {
 				for _, p := range pointer.KVs {
-					changes = append(changes, &Change[T]{
+					changes = append(changes, &Change[V]{
 						Type:   Remove,
 						Key:    string(p.Key),
-						Before: &p.Value,
+						Before: p.Value,
 						After:  nil,
 					})
 				}
@@ -160,11 +160,11 @@ func diffNode[T HamtValue[T]](ctx context.Context, pre, cur *Node[T], depth int)
 				changes = append(changes, add...)
 			} else {
 				for _, p := range pointer.KVs {
-					changes = append(changes, &Change[T]{
+					changes = append(changes, &Change[V]{
 						Type:   Add,
 						Key:    string(p.Key),
 						Before: nil,
-						After:  &p.Value,
+						After:  p.Value,
 					})
 				}
 			}
@@ -174,21 +174,21 @@ func diffNode[T HamtValue[T]](ctx context.Context, pre, cur *Node[T], depth int)
 	return changes, nil
 }
 
-func diffKVs[T HamtValue[T]](pre, cur []*KV[T], idx int) []*Change[T] {
-	preMap := make(map[string]*T, len(pre))
-	curMap := make(map[string]*T, len(cur))
-	var changes []*Change[T]
+func diffKVs[V any, T HamtValue[V]](pre, cur []*KV[V, T], idx int) []*Change[V] {
+	preMap := make(map[string]T, len(pre))
+	curMap := make(map[string]T, len(cur))
+	var changes []*Change[V]
 
 	for _, kv := range pre {
-		preMap[string(kv.Key)] = &kv.Value
+		preMap[string(kv.Key)] = kv.Value
 	}
 	for _, kv := range cur {
-		curMap[string(kv.Key)] = &kv.Value
+		curMap[string(kv.Key)] = kv.Value
 	}
 	// find removed keys: keys in pre and not in cur
 	for key, value := range preMap {
 		if _, ok := curMap[key]; !ok {
-			changes = append(changes, &Change[T]{
+			changes = append(changes, &Change[V]{
 				Type:   Remove,
 				Key:    key,
 				Before: value,
@@ -200,15 +200,15 @@ func diffKVs[T HamtValue[T]](pre, cur []*KV[T], idx int) []*Change[T] {
 	// find modified values: keys in cur and pre with different values
 	for key, curVal := range curMap {
 		if preVal, ok := preMap[key]; !ok {
-			changes = append(changes, &Change[T]{
+			changes = append(changes, &Change[V]{
 				Type:   Add,
 				Key:    key,
 				Before: nil,
 				After:  curVal,
 			})
 		} else {
-			if !(*preVal).Equal(*curVal) {
-				changes = append(changes, &Change[T]{
+			if !preVal.Equal(curVal) {
+				changes = append(changes, &Change[V]{
 					Type:   Modify,
 					Key:    key,
 					Before: preVal,
@@ -220,14 +220,14 @@ func diffKVs[T HamtValue[T]](pre, cur []*KV[T], idx int) []*Change[T] {
 	return changes
 }
 
-func addAll[T HamtValue[T]](ctx context.Context, node *Node[T], idx int) ([]*Change[T], error) {
-	var changes []*Change[T]
+func addAll[V any, T HamtValue[V]](ctx context.Context, node *Node[V, T], idx int) ([]*Change[V], error) {
+	var changes []*Change[V]
 	if err := node.ForEach(ctx, func(k string, val T) error {
-		changes = append(changes, &Change[T]{
+		changes = append(changes, &Change[V]{
 			Type:   Add,
 			Key:    k,
 			Before: nil,
-			After:  &val,
+			After:  val,
 		})
 
 		return nil
@@ -237,13 +237,13 @@ func addAll[T HamtValue[T]](ctx context.Context, node *Node[T], idx int) ([]*Cha
 	return changes, nil
 }
 
-func removeAll[T HamtValue[T]](ctx context.Context, node *Node[T], idx int) ([]*Change[T], error) {
-	var changes []*Change[T]
+func removeAll[V any, T HamtValue[V]](ctx context.Context, node *Node[V, T], idx int) ([]*Change[V], error) {
+	var changes []*Change[V]
 	if err := node.ForEach(ctx, func(k string, val T) error {
-		changes = append(changes, &Change[T]{
+		changes = append(changes, &Change[V]{
 			Type:   Remove,
 			Key:    k,
-			Before: &val,
+			Before: val,
 			After:  nil,
 		})
 

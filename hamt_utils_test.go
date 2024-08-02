@@ -62,10 +62,10 @@ func (c *CborByteArray) UnmarshalCBOR(r io.Reader) error {
 	return nil
 }
 
-func cborstr(s string) **CborByteArray {
+func cborstr(s string) *CborByteArray {
 	v := CborByteArray(s)
 	vp := &v
-	return &vp
+	return vp
 }
 
 type CborInt int64

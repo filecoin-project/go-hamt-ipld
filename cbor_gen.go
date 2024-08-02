@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	"reflect"
 
 	cbg "github.com/whyrusleeping/cbor-gen"
 	xerrors "golang.org/x/xerrors"
@@ -19,7 +18,7 @@ var _ = xerrors.Errorf
 
 var lengthBufNode = []byte{130}
 
-func (t *Node[T]) MarshalCBOR(w io.Writer) error {
+func (t *Node[V, T]) MarshalCBOR(w io.Writer) error {
 	if t == nil {
 		_, err := w.Write(cbg.CborNull)
 		return err
@@ -62,8 +61,8 @@ func (t *Node[T]) MarshalCBOR(w io.Writer) error {
 	return nil
 }
 
-func (t *Node[T]) UnmarshalCBOR(r io.Reader) (err error) {
-	*t = Node[T]{}
+func (t *Node[V, T]) UnmarshalCBOR(r io.Reader) (err error) {
+	*t = Node[V, T]{}
 
 	cr := cbg.NewCborReader(r)
 
@@ -125,12 +124,12 @@ func (t *Node[T]) UnmarshalCBOR(r io.Reader) (err error) {
 	}
 
 	if extra > 0 {
-		t.Pointers = make([]*Pointer[T], extra)
+		t.Pointers = make([]*Pointer[V, T], extra)
 	}
 
 	for i := 0; i < int(extra); i++ {
 
-		var v Pointer[T]
+		var v Pointer[V, T]
 		if err := v.UnmarshalCBOR(cr); err != nil {
 			return err
 		}
@@ -143,7 +142,7 @@ func (t *Node[T]) UnmarshalCBOR(r io.Reader) (err error) {
 
 var lengthBufKV = []byte{130}
 
-func (t *KV[T]) MarshalCBOR(w io.Writer) error {
+func (t *KV[V, T]) MarshalCBOR(w io.Writer) error {
 	if t == nil {
 		_, err := w.Write(cbg.CborNull)
 		return err
@@ -175,8 +174,8 @@ func (t *KV[T]) MarshalCBOR(w io.Writer) error {
 	return nil
 }
 
-func (t *KV[T]) UnmarshalCBOR(r io.Reader) (err error) {
-	*t = KV[T]{}
+func (t *KV[V, T]) UnmarshalCBOR(r io.Reader) (err error) {
+	*t = KV[V, T]{}
 
 	cr := cbg.NewCborReader(r)
 
@@ -224,9 +223,7 @@ func (t *KV[T]) UnmarshalCBOR(r io.Reader) (err error) {
 
 	{
 
-		valueType := reflect.TypeOf(t.Value).Elem()
-		value := reflect.New(valueType).Interface().(T)
-
+		var value T = new(V)
 		if err := value.UnmarshalCBOR(cr); err != nil {
 			return xerrors.Errorf("failed to read field: %w", err)
 		}

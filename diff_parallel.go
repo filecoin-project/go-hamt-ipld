@@ -11,17 +11,17 @@ import (
 )
 
 // ParallelDiff returns a set of changes that transform node 'prev' into node 'cur'. opts are applied to both prev and cur.
-func ParallelDiff[T HamtValue[T]](ctx context.Context, prevBs, curBs cbor.IpldStore, prev, cur cid.Cid, workers int64, opts ...Option) ([]*Change[T], error) {
+func ParallelDiff[V any, T HamtValue[V]](ctx context.Context, prevBs, curBs cbor.IpldStore, prev, cur cid.Cid, workers int64, opts ...Option) ([]*Change[V], error) {
 	if prev.Equals(cur) {
 		return nil, nil
 	}
 
-	prevHamt, err := LoadNode[T](ctx, prevBs, prev, opts...)
+	prevHamt, err := LoadNode[V, T](ctx, prevBs, prev, opts...)
 	if err != nil {
 		return nil, err
 	}
 
-	curHamt, err := LoadNode[T](ctx, curBs, cur, opts...)
+	curHamt, err := LoadNode[V, T](ctx, curBs, cur, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -33,17 +33,17 @@ func ParallelDiff[T HamtValue[T]](ctx context.Context, prevBs, curBs cbor.IpldSt
 	return doParallelDiffNode(ctx, prevHamt, curHamt, workers)
 }
 
-func doParallelDiffNode[T HamtValue[T]](ctx context.Context, pre, cur *Node[T], workers int64) ([]*Change[T], error) {
+func doParallelDiffNode[V any, T HamtValue[V]](ctx context.Context, pre, cur *Node[V, T], workers int64) ([]*Change[V], error) {
 	bp := cur.Bitfield.BitLen()
 	if pre.Bitfield.BitLen() > bp {
 		bp = pre.Bitfield.BitLen()
 	}
 
-	initTasks := []*task[T]{}
+	initTasks := []*task[V, T]{}
 	for idx := bp; idx >= 0; idx-- {
 		preBit := pre.Bitfield.Bit(idx)
 		curBit := cur.Bitfield.Bit(idx)
-		initTasks = append(initTasks, &task[T]{
+		initTasks = append(initTasks, &task[V, T]{
 			idx:    idx,
 			pre:    pre,
 			preBit: preBit,
@@ -52,12 +52,12 @@ func doParallelDiffNode[T HamtValue[T]](ctx context.Context, pre, cur *Node[T], 
 		})
 	}
 
-	out := make(chan *Change[T], 2*workers)
+	out := make(chan *Change[V], 2*workers)
 	differ, ctx := newDiffScheduler(ctx, workers, initTasks...)
 	differ.startWorkers(ctx, out)
 	differ.startScheduler(ctx)
 
-	var changes []*Change[T]
+	var changes []*Change[V]
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -73,48 +73,48 @@ func doParallelDiffNode[T HamtValue[T]](ctx context.Context, pre, cur *Node[T], 
 	return changes, err
 }
 
-type task[T HamtValue[T]] struct {
+type task[V any, T HamtValue[V]] struct {
 	idx int
 
-	pre    *Node[T]
+	pre    *Node[V, T]
 	preBit uint
 
-	cur    *Node[T]
+	cur    *Node[V, T]
 	curBit uint
 }
 
-func newDiffScheduler[T HamtValue[T]](ctx context.Context, numWorkers int64, rootTasks ...*task[T]) (*diffScheduler[T], context.Context) {
+func newDiffScheduler[V any, T HamtValue[V]](ctx context.Context, numWorkers int64, rootTasks ...*task[V, T]) (*diffScheduler[V, T], context.Context) {
 	grp, ctx := errgroup.WithContext(ctx)
-	s := &diffScheduler[T]{
+	s := &diffScheduler[V, T]{
 		numWorkers: numWorkers,
 		stack:      rootTasks,
-		in:         make(chan *task[T], numWorkers),
-		out:        make(chan *task[T], numWorkers),
+		in:         make(chan *task[V, T], numWorkers),
+		out:        make(chan *task[V, T], numWorkers),
 		grp:        grp,
 	}
 	s.taskWg.Add(len(rootTasks))
 	return s, ctx
 }
 
-type diffScheduler[T HamtValue[T]] struct {
+type diffScheduler[V any, T HamtValue[V]] struct {
 	// number of worker routine to spawn
 	numWorkers int64
 	// buffer holds tasks until they are processed
-	stack []*task[T]
+	stack []*task[V, T]
 	// inbound and outbound tasks
-	in, out chan *task[T]
+	in, out chan *task[V, T]
 	// tracks number of inflight tasks
 	taskWg sync.WaitGroup
 	// launches workers and collects errors if any occur
 	grp *errgroup.Group
 }
 
-func (s *diffScheduler[T]) enqueueTask(task *task[T]) {
+func (s *diffScheduler[V, T]) enqueueTask(task *task[V, T]) {
 	s.taskWg.Add(1)
 	s.in <- task
 }
 
-func (s *diffScheduler[T]) startScheduler(ctx context.Context) {
+func (s *diffScheduler[V, T]) startScheduler(ctx context.Context) {
 	s.grp.Go(func() error {
 		defer func() {
 			close(s.out)
@@ -161,7 +161,7 @@ func (s *diffScheduler[T]) startScheduler(ctx context.Context) {
 	})
 }
 
-func (s *diffScheduler[T]) startWorkers(ctx context.Context, out chan *Change[T]) {
+func (s *diffScheduler[V, T]) startWorkers(ctx context.Context, out chan *Change[V]) {
 	for i := int64(0); i < s.numWorkers; i++ {
 		s.grp.Go(func() error {
 			for task := range s.out {
@@ -174,7 +174,7 @@ func (s *diffScheduler[T]) startWorkers(ctx context.Context, out chan *Change[T]
 	}
 }
 
-func (s *diffScheduler[T]) work(ctx context.Context, todo *task[T], results chan *Change[T]) error {
+func (s *diffScheduler[V, T]) work(ctx context.Context, todo *task[V, T], results chan *Change[V]) error {
 	defer s.taskWg.Done()
 	idx := todo.idx
 	preBit := todo.preBit
@@ -209,7 +209,7 @@ func (s *diffScheduler[T]) work(ctx context.Context, todo *task[T], results chan
 			for idx := bp; idx >= 0; idx-- {
 				preBit := preChild.Bitfield.Bit(idx)
 				curBit := curChild.Bitfield.Bit(idx)
-				s.enqueueTask(&task[T]{
+				s.enqueueTask(&task[V, T]{
 					idx:    idx,
 					pre:    preChild,
 					preBit: preBit,
@@ -253,10 +253,10 @@ func (s *diffScheduler[T]) work(ctx context.Context, todo *task[T], results chan
 			}
 		} else {
 			for _, p := range pointer.KVs {
-				results <- &Change[T]{
+				results <- &Change[V]{
 					Type:   Remove,
 					Key:    string(p.Key),
-					Before: &p.Value,
+					Before: p.Value,
 					After:  nil,
 				}
 			}
@@ -276,11 +276,11 @@ func (s *diffScheduler[T]) work(ctx context.Context, todo *task[T], results chan
 			}
 		} else {
 			for _, p := range pointer.KVs {
-				results <- &Change[T]{
+				results <- &Change[V]{
 					Type:   Add,
 					Key:    string(p.Key),
 					Before: nil,
-					After:  &p.Value,
+					After:  p.Value,
 				}
 			}
 		}
@@ -288,20 +288,20 @@ func (s *diffScheduler[T]) work(ctx context.Context, todo *task[T], results chan
 	return nil
 }
 
-func parallelDiffKVs[T HamtValue[T]](pre, cur []*KV[T], out chan *Change[T]) {
-	preMap := make(map[string]*T, len(pre))
-	curMap := make(map[string]*T, len(cur))
+func parallelDiffKVs[V any, T HamtValue[V]](pre, cur []*KV[V, T], out chan *Change[V]) {
+	preMap := make(map[string]T, len(pre))
+	curMap := make(map[string]T, len(cur))
 
 	for _, kv := range pre {
-		preMap[string(kv.Key)] = &kv.Value
+		preMap[string(kv.Key)] = kv.Value
 	}
 	for _, kv := range cur {
-		curMap[string(kv.Key)] = &kv.Value
+		curMap[string(kv.Key)] = kv.Value
 	}
 	// find removed keys: keys in pre and not in cur
 	for key, value := range preMap {
 		if _, ok := curMap[key]; !ok {
-			out <- &Change[T]{
+			out <- &Change[V]{
 				Type:   Remove,
 				Key:    key,
 				Before: value,
@@ -313,15 +313,15 @@ func parallelDiffKVs[T HamtValue[T]](pre, cur []*KV[T], out chan *Change[T]) {
 	// find modified values: keys in cur and pre with different values
 	for key, curVal := range curMap {
 		if preVal, ok := preMap[key]; !ok {
-			out <- &Change[T]{
+			out <- &Change[V]{
 				Type:   Add,
 				Key:    key,
 				Before: nil,
 				After:  curVal,
 			}
 		} else {
-			if !(*preVal).Equal(*curVal) {
-				out <- &Change[T]{
+			if !preVal.Equal(curVal) {
+				out <- &Change[V]{
 					Type:   Modify,
 					Key:    key,
 					Before: preVal,
@@ -332,24 +332,24 @@ func parallelDiffKVs[T HamtValue[T]](pre, cur []*KV[T], out chan *Change[T]) {
 	}
 }
 
-func parallelAddAll[T HamtValue[T]](ctx context.Context, node *Node[T], out chan *Change[T]) error {
+func parallelAddAll[V any, T HamtValue[V]](ctx context.Context, node *Node[V, T], out chan *Change[V]) error {
 	return node.ForEach(ctx, func(k string, val T) error {
-		out <- &Change[T]{
+		out <- &Change[V]{
 			Type:   Add,
 			Key:    k,
 			Before: nil,
-			After:  &val,
+			After:  val,
 		}
 		return nil
 	})
 }
 
-func parallelRemoveAll[T HamtValue[T]](ctx context.Context, node *Node[T], out chan *Change[T]) error {
+func parallelRemoveAll[V any, T HamtValue[V]](ctx context.Context, node *Node[V, T], out chan *Change[V]) error {
 	return node.ForEach(ctx, func(k string, val T) error {
-		out <- &Change[T]{
+		out <- &Change[V]{
 			Type:   Remove,
 			Key:    k,
-			Before: &val,
+			Before: val,
 			After:  nil,
 		}
 		return nil

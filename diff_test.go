@@ -17,10 +17,10 @@ func TestSimpleEquals(t *testing.T) {
 	curBs := cbor.NewCborStore(newMockBlocks())
 	ctx := context.Background()
 
-	prev, err := NewNode[*CborByteArray](prevBs)
+	prev, err := NewNode[CborByteArray](prevBs)
 	assert.NoError(t, err)
 
-	cur, err := NewNode[*CborByteArray](curBs)
+	cur, err := NewNode[CborByteArray](curBs)
 	assert.NoError(t, err)
 
 	_ = diffAndAssertLength(ctx, t, prevBs, curBs, prev, cur, 0)
@@ -36,10 +36,10 @@ func TestSimpleAdd(t *testing.T) {
 	curBs := cbor.NewCborStore(newMockBlocks())
 	ctx := context.Background()
 
-	a, err := NewNode[*CborByteArray](prevBs)
+	a, err := NewNode[CborByteArray](prevBs)
 	assert.NoError(t, err)
 
-	b, err := NewNode[*CborByteArray](curBs)
+	b, err := NewNode[CborByteArray](curBs)
 	assert.NoError(t, err)
 
 	assertSet(t, a, 2, "foo")
@@ -68,10 +68,10 @@ func TestSimpleRemove(t *testing.T) {
 	curBs := cbor.NewCborStore(newMockBlocks())
 	ctx := context.Background()
 
-	a, err := NewNode[*CborByteArray](prevBs)
+	a, err := NewNode[CborByteArray](prevBs)
 	assert.NoError(t, err)
 
-	b, err := NewNode[*CborByteArray](curBs)
+	b, err := NewNode[CborByteArray](curBs)
 	assert.NoError(t, err)
 
 	assertSet(t, a, 2, "foo")
@@ -100,10 +100,10 @@ func TestSimpleModify(t *testing.T) {
 	curBs := cbor.NewCborStore(newMockBlocks())
 	ctx := context.Background()
 
-	a, err := NewNode[*CborByteArray](prevBs)
+	a, err := NewNode[CborByteArray](prevBs)
 	assert.NoError(t, err)
 
-	b, err := NewNode[*CborByteArray](curBs)
+	b, err := NewNode[CborByteArray](curBs)
 	assert.NoError(t, err)
 
 	assertSet(t, a, 2, "foo")
@@ -126,10 +126,10 @@ func TestLargeModify(t *testing.T) {
 	curBs := cbor.NewCborStore(newMockBlocks())
 	ctx := context.Background()
 
-	a, err := NewNode[*CborByteArray](prevBs)
+	a, err := NewNode[CborByteArray](prevBs)
 	assert.NoError(t, err)
 
-	b, err := NewNode[*CborByteArray](curBs)
+	b, err := NewNode[CborByteArray](curBs)
 	assert.NoError(t, err)
 
 	for i := 0; i < 100; i++ {
@@ -181,10 +181,10 @@ func TestLargeAdditions(t *testing.T) {
 	curBs := cbor.NewCborStore(newMockBlocks())
 	ctx := context.Background()
 
-	a, err := NewNode[*CborByteArray](prevBs)
+	a, err := NewNode[CborByteArray](prevBs)
 	assert.NoError(t, err)
 
-	b, err := NewNode[*CborByteArray](curBs)
+	b, err := NewNode[CborByteArray](curBs)
 	assert.NoError(t, err)
 
 	for i := 0; i < 100; i++ {
@@ -230,10 +230,10 @@ func bigDiff(t *testing.T, scale int) {
 	curBs := cbor.NewCborStore(newMockBlocks())
 	ctx := context.Background()
 
-	a, err := NewNode[*CborByteArray](prevBs)
+	a, err := NewNode[CborByteArray](prevBs)
 	assert.NoError(t, err)
 
-	b, err := NewNode[*CborByteArray](curBs)
+	b, err := NewNode[CborByteArray](curBs)
 	assert.NoError(t, err)
 
 	for i := 0; i < 100*scale; i++ {
@@ -340,7 +340,7 @@ func TestBigDiff(t *testing.T) {
 	}
 }
 
-func diffAndAssertLength(ctx context.Context, t *testing.T, prevBs, curBs cbor.IpldStore, a, b *Node[*CborByteArray], expectedLength int) []*Change[*CborByteArray] {
+func diffAndAssertLength(ctx context.Context, t *testing.T, prevBs, curBs cbor.IpldStore, a, b *Node[CborByteArray, *CborByteArray], expectedLength int) []*Change[CborByteArray] {
 	if err := a.Flush(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -370,7 +370,7 @@ func diffAndAssertLength(ctx context.Context, t *testing.T, prevBs, curBs cbor.I
 	return cs
 }
 
-func assertSet(t *testing.T, r *Node[*CborByteArray], i int, val string) {
+func assertSet(t *testing.T, r *Node[CborByteArray, *CborByteArray], i int, val string) {
 	ctx := context.Background()
 
 	t.Helper()
@@ -379,7 +379,7 @@ func assertSet(t *testing.T, r *Node[*CborByteArray], i int, val string) {
 	}
 }
 
-func assertGet(ctx context.Context, t testing.TB, r *Node[*CborByteArray], i int, val string) {
+func assertGet(ctx context.Context, t testing.TB, r *Node[CborByteArray, *CborByteArray], i int, val string) {
 	t.Helper()
 	found, _, err := r.Find(ctx, strconv.Itoa(i))
 	require.NoError(t, err)
@@ -389,7 +389,7 @@ func assertGet(ctx context.Context, t testing.TB, r *Node[*CborByteArray], i int
 	require.NoError(t, err)
 	require.True(t, found)
 
-	if !out.Equal(*cborstr(val)) {
+	if !out.Equal(cborstr(val)) {
 		t.Fatal("value we got out didnt match expectation")
 	}
 }
@@ -401,7 +401,7 @@ type expectedChange struct {
 	After  string
 }
 
-func (ec expectedChange) assertExpectation(t *testing.T, change *Change[*CborByteArray]) {
+func (ec expectedChange) assertExpectation(t *testing.T, change *Change[CborByteArray]) {
 	assert.Equal(t, ec.Type, change.Type)
 	assert.Equal(t, ec.Key, change.Key)
 
