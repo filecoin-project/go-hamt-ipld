@@ -8,6 +8,10 @@ test:
 	go test ./...
 .PHONY: test
 
+gen:
+	go run ./gen
+.PHONY: gen
+
 coverage:
 	go test -coverprofile=coverage.out ./...
 	go tool cover -html=coverage.out
