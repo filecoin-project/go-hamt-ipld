@@ -23,7 +23,7 @@ func (t *Pointer) MarshalCBOR(w io.Writer) error {
 			return err
 		}
 	} else {
-		if err := cw.WriteMajorTypeHeader(cbg.MajArray, uint64(len(t.KVs))); err != nil {
+		if err := cw.CborWriteHeader(cbg.MajArray, uint64(len(t.KVs))); err != nil {
 			return err
 		}
 
