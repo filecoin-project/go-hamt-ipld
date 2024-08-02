@@ -1,29 +1,27 @@
 package hamt
 
 import (
-	"bytes"
 	"context"
 	"sync"
 
 	"github.com/ipfs/go-cid"
 	cbor "github.com/ipfs/go-ipld-cbor"
-	cbg "github.com/whyrusleeping/cbor-gen"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/xerrors"
 )
 
 // ParallelDiff returns a set of changes that transform node 'prev' into node 'cur'. opts are applied to both prev and cur.
-func ParallelDiff(ctx context.Context, prevBs, curBs cbor.IpldStore, prev, cur cid.Cid, workers int64, opts ...Option) ([]*Change, error) {
+func ParallelDiff[T HamtValue[T]](ctx context.Context, prevBs, curBs cbor.IpldStore, prev, cur cid.Cid, workers int64, opts ...Option) ([]*Change[T], error) {
 	if prev.Equals(cur) {
 		return nil, nil
 	}
 
-	prevHamt, err := LoadNode(ctx, prevBs, prev, opts...)
+	prevHamt, err := LoadNode[T](ctx, prevBs, prev, opts...)
 	if err != nil {
 		return nil, err
 	}
 
-	curHamt, err := LoadNode(ctx, curBs, cur, opts...)
+	curHamt, err := LoadNode[T](ctx, curBs, cur, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -35,17 +33,17 @@ func ParallelDiff(ctx context.Context, prevBs, curBs cbor.IpldStore, prev, cur c
 	return doParallelDiffNode(ctx, prevHamt, curHamt, workers)
 }
 
-func doParallelDiffNode(ctx context.Context, pre, cur *Node, workers int64) ([]*Change, error) {
+func doParallelDiffNode[T HamtValue[T]](ctx context.Context, pre, cur *Node[T], workers int64) ([]*Change[T], error) {
 	bp := cur.Bitfield.BitLen()
 	if pre.Bitfield.BitLen() > bp {
 		bp = pre.Bitfield.BitLen()
 	}
 
-	initTasks := []*task{}
+	initTasks := []*task[T]{}
 	for idx := bp; idx >= 0; idx-- {
 		preBit := pre.Bitfield.Bit(idx)
 		curBit := cur.Bitfield.Bit(idx)
-		initTasks = append(initTasks, &task{
+		initTasks = append(initTasks, &task[T]{
 			idx:    idx,
 			pre:    pre,
 			preBit: preBit,
@@ -54,12 +52,12 @@ func doParallelDiffNode(ctx context.Context, pre, cur *Node, workers int64) ([]*
 		})
 	}
 
-	out := make(chan *Change, 2*workers)
+	out := make(chan *Change[T], 2*workers)
 	differ, ctx := newDiffScheduler(ctx, workers, initTasks...)
 	differ.startWorkers(ctx, out)
 	differ.startScheduler(ctx)
 
-	var changes []*Change
+	var changes []*Change[T]
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -75,48 +73,48 @@ func doParallelDiffNode(ctx context.Context, pre, cur *Node, workers int64) ([]*
 	return changes, err
 }
 
-type task struct {
+type task[T HamtValue[T]] struct {
 	idx int
 
-	pre    *Node
+	pre    *Node[T]
 	preBit uint
 
-	cur    *Node
+	cur    *Node[T]
 	curBit uint
 }
 
-func newDiffScheduler(ctx context.Context, numWorkers int64, rootTasks ...*task) (*diffScheduler, context.Context) {
+func newDiffScheduler[T HamtValue[T]](ctx context.Context, numWorkers int64, rootTasks ...*task[T]) (*diffScheduler[T], context.Context) {
 	grp, ctx := errgroup.WithContext(ctx)
-	s := &diffScheduler{
+	s := &diffScheduler[T]{
 		numWorkers: numWorkers,
 		stack:      rootTasks,
-		in:         make(chan *task, numWorkers),
-		out:        make(chan *task, numWorkers),
+		in:         make(chan *task[T], numWorkers),
+		out:        make(chan *task[T], numWorkers),
 		grp:        grp,
 	}
 	s.taskWg.Add(len(rootTasks))
 	return s, ctx
 }
 
-type diffScheduler struct {
+type diffScheduler[T HamtValue[T]] struct {
 	// number of worker routine to spawn
 	numWorkers int64
 	// buffer holds tasks until they are processed
-	stack []*task
+	stack []*task[T]
 	// inbound and outbound tasks
-	in, out chan *task
+	in, out chan *task[T]
 	// tracks number of inflight tasks
 	taskWg sync.WaitGroup
 	// launches workers and collects errors if any occur
 	grp *errgroup.Group
 }
 
-func (s *diffScheduler) enqueueTask(task *task) {
+func (s *diffScheduler[T]) enqueueTask(task *task[T]) {
 	s.taskWg.Add(1)
 	s.in <- task
 }
 
-func (s *diffScheduler) startScheduler(ctx context.Context) {
+func (s *diffScheduler[T]) startScheduler(ctx context.Context) {
 	s.grp.Go(func() error {
 		defer func() {
 			close(s.out)
@@ -163,7 +161,7 @@ func (s *diffScheduler) startScheduler(ctx context.Context) {
 	})
 }
 
-func (s *diffScheduler) startWorkers(ctx context.Context, out chan *Change) {
+func (s *diffScheduler[T]) startWorkers(ctx context.Context, out chan *Change[T]) {
 	for i := int64(0); i < s.numWorkers; i++ {
 		s.grp.Go(func() error {
 			for task := range s.out {
@@ -176,7 +174,7 @@ func (s *diffScheduler) startWorkers(ctx context.Context, out chan *Change) {
 	}
 }
 
-func (s *diffScheduler) work(ctx context.Context, todo *task, results chan *Change) error {
+func (s *diffScheduler[T]) work(ctx context.Context, todo *task[T], results chan *Change[T]) error {
 	defer s.taskWg.Done()
 	idx := todo.idx
 	preBit := todo.preBit
@@ -211,7 +209,7 @@ func (s *diffScheduler) work(ctx context.Context, todo *task, results chan *Chan
 			for idx := bp; idx >= 0; idx-- {
 				preBit := preChild.Bitfield.Bit(idx)
 				curBit := curChild.Bitfield.Bit(idx)
-				s.enqueueTask(&task{
+				s.enqueueTask(&task[T]{
 					idx:    idx,
 					pre:    preChild,
 					preBit: preBit,
@@ -255,10 +253,10 @@ func (s *diffScheduler) work(ctx context.Context, todo *task, results chan *Chan
 			}
 		} else {
 			for _, p := range pointer.KVs {
-				results <- &Change{
+				results <- &Change[T]{
 					Type:   Remove,
 					Key:    string(p.Key),
-					Before: p.Value,
+					Before: &p.Value,
 					After:  nil,
 				}
 			}
@@ -278,11 +276,11 @@ func (s *diffScheduler) work(ctx context.Context, todo *task, results chan *Chan
 			}
 		} else {
 			for _, p := range pointer.KVs {
-				results <- &Change{
+				results <- &Change[T]{
 					Type:   Add,
 					Key:    string(p.Key),
 					Before: nil,
-					After:  p.Value,
+					After:  &p.Value,
 				}
 			}
 		}
@@ -290,20 +288,20 @@ func (s *diffScheduler) work(ctx context.Context, todo *task, results chan *Chan
 	return nil
 }
 
-func parallelDiffKVs(pre, cur []*KV, out chan *Change) {
-	preMap := make(map[string]*cbg.Deferred, len(pre))
-	curMap := make(map[string]*cbg.Deferred, len(cur))
+func parallelDiffKVs[T HamtValue[T]](pre, cur []*KV[T], out chan *Change[T]) {
+	preMap := make(map[string]*T, len(pre))
+	curMap := make(map[string]*T, len(cur))
 
 	for _, kv := range pre {
-		preMap[string(kv.Key)] = kv.Value
+		preMap[string(kv.Key)] = &kv.Value
 	}
 	for _, kv := range cur {
-		curMap[string(kv.Key)] = kv.Value
+		curMap[string(kv.Key)] = &kv.Value
 	}
 	// find removed keys: keys in pre and not in cur
 	for key, value := range preMap {
 		if _, ok := curMap[key]; !ok {
-			out <- &Change{
+			out <- &Change[T]{
 				Type:   Remove,
 				Key:    key,
 				Before: value,
@@ -315,15 +313,15 @@ func parallelDiffKVs(pre, cur []*KV, out chan *Change) {
 	// find modified values: keys in cur and pre with different values
 	for key, curVal := range curMap {
 		if preVal, ok := preMap[key]; !ok {
-			out <- &Change{
+			out <- &Change[T]{
 				Type:   Add,
 				Key:    key,
 				Before: nil,
 				After:  curVal,
 			}
 		} else {
-			if !bytes.Equal(preVal.Raw, curVal.Raw) {
-				out <- &Change{
+			if !(*preVal).Equal(*curVal) {
+				out <- &Change[T]{
 					Type:   Modify,
 					Key:    key,
 					Before: preVal,
@@ -334,24 +332,24 @@ func parallelDiffKVs(pre, cur []*KV, out chan *Change) {
 	}
 }
 
-func parallelAddAll(ctx context.Context, node *Node, out chan *Change) error {
-	return node.ForEach(ctx, func(k string, val *cbg.Deferred) error {
-		out <- &Change{
+func parallelAddAll[T HamtValue[T]](ctx context.Context, node *Node[T], out chan *Change[T]) error {
+	return node.ForEach(ctx, func(k string, val T) error {
+		out <- &Change[T]{
 			Type:   Add,
 			Key:    k,
 			Before: nil,
-			After:  val,
+			After:  &val,
 		}
 		return nil
 	})
 }
 
-func parallelRemoveAll(ctx context.Context, node *Node, out chan *Change) error {
-	return node.ForEach(ctx, func(k string, val *cbg.Deferred) error {
-		out <- &Change{
+func parallelRemoveAll[T HamtValue[T]](ctx context.Context, node *Node[T], out chan *Change[T]) error {
+	return node.ForEach(ctx, func(k string, val T) error {
+		out <- &Change[T]{
 			Type:   Remove,
 			Key:    k,
-			Before: val,
+			Before: &val,
 			After:  nil,
 		}
 		return nil

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"reflect"
 
 	cbg "github.com/whyrusleeping/cbor-gen"
 	xerrors "golang.org/x/xerrors"
@@ -18,7 +19,7 @@ var _ = xerrors.Errorf
 
 var lengthBufNode = []byte{130}
 
-func (t *Node) MarshalCBOR(w io.Writer) error {
+func (t *Node[T]) MarshalCBOR(w io.Writer) error {
 	if t == nil {
 		_, err := w.Write(cbg.CborNull)
 		return err
@@ -57,13 +58,12 @@ func (t *Node) MarshalCBOR(w io.Writer) error {
 		if err := v.MarshalCBOR(cw); err != nil {
 			return err
 		}
-
 	}
 	return nil
 }
 
-func (t *Node) UnmarshalCBOR(r io.Reader) (err error) {
-	*t = Node{}
+func (t *Node[T]) UnmarshalCBOR(r io.Reader) (err error) {
+	*t = Node[T]{}
 
 	cr := cbg.NewCborReader(r)
 
@@ -125,12 +125,12 @@ func (t *Node) UnmarshalCBOR(r io.Reader) (err error) {
 	}
 
 	if extra > 0 {
-		t.Pointers = make([]*Pointer, extra)
+		t.Pointers = make([]*Pointer[T], extra)
 	}
 
 	for i := 0; i < int(extra); i++ {
 
-		var v Pointer
+		var v Pointer[T]
 		if err := v.UnmarshalCBOR(cr); err != nil {
 			return err
 		}
@@ -143,7 +143,7 @@ func (t *Node) UnmarshalCBOR(r io.Reader) (err error) {
 
 var lengthBufKV = []byte{130}
 
-func (t *KV) MarshalCBOR(w io.Writer) error {
+func (t *KV[T]) MarshalCBOR(w io.Writer) error {
 	if t == nil {
 		_, err := w.Write(cbg.CborNull)
 		return err
@@ -168,15 +168,15 @@ func (t *KV) MarshalCBOR(w io.Writer) error {
 		return err
 	}
 
-	// t.Value (typegen.Deferred) (struct)
+	// t.Value (T) (struct)
 	if err := t.Value.MarshalCBOR(cw); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (t *KV) UnmarshalCBOR(r io.Reader) (err error) {
-	*t = KV{}
+func (t *KV[T]) UnmarshalCBOR(r io.Reader) (err error) {
+	*t = KV[T]{}
 
 	cr := cbg.NewCborReader(r)
 
@@ -220,15 +220,19 @@ func (t *KV) UnmarshalCBOR(r io.Reader) (err error) {
 		return err
 	}
 
-	// t.Value (typegen.Deferred) (struct)
+	// t.Value (T) (struct)
 
 	{
 
-		t.Value = new(cbg.Deferred)
+		valueType := reflect.TypeOf(t.Value).Elem()
+		value := reflect.New(valueType).Interface().(T)
 
-		if err := t.Value.UnmarshalCBOR(cr); err != nil {
-			return xerrors.Errorf("failed to read deferred field: %w", err)
+		if err := value.UnmarshalCBOR(cr); err != nil {
+			return xerrors.Errorf("failed to read field: %w", err)
 		}
+
+		t.Value = value
+
 	}
 	return nil
 }
