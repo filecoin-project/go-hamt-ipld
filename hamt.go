@@ -383,6 +383,11 @@ func loadNode(
 	}
 
 	for _, ch := range out.Pointers {
+		if ch == nil {
+			// Cannot have nil pointers.
+			return nil, ErrMalformedHamt
+		}
+
 		isLink := ch.isShard()
 		isBucket := ch.KVs != nil
 		if isLink == isBucket {
@@ -396,6 +401,12 @@ func loadNode(
 		if isBucket {
 			if len(ch.KVs) == 0 || len(ch.KVs) > bucketSize {
 				return nil, ErrMalformedHamt
+			}
+			for _, kv := range ch.KVs {
+				if kv == nil {
+					// Cannot have nil pointers kvs.
+					return nil, ErrMalformedHamt
+				}
 			}
 			for i := 1; i < len(ch.KVs); i++ {
 				if bytes.Compare(ch.KVs[i-1].Key, ch.KVs[i].Key) >= 0 {
