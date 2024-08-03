@@ -390,10 +390,10 @@ func addAndRemoveKeys(t *testing.T, keys []string, extraKeys []string, options .
 	n.bitWidth = begn.bitWidth
 	for k, v := range vals {
 		var out *CborByteArray
-		found, out, err := n.Find(ctx, k)
+		out, found, err := n.Find(ctx, k)
 		require.NoError(t, err)
 		require.True(t, found, "key not found")
-		if !out.Equal(v) {
+		if !out.Equals(v) {
 			t.Fatalf("got wrong value after value change: %x != %x", out, v)
 		}
 	}
@@ -558,10 +558,10 @@ func testBasic(t *testing.T, options ...Option) {
 	require.NoError(t, err)
 
 	var out *CborByteArray
-	found, out, err := n.Find(ctx, "foo")
+	out, found, err := n.Find(ctx, "foo")
 	require.NoError(t, err)
 	require.True(t, found, "key not found")
-	if !out.Equal(val) {
+	if !out.Equals(val) {
 		t.Fatal("out bytes were wrong: ", out)
 	}
 }
@@ -668,7 +668,7 @@ func TestDelete(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, found, "key not found")
 
-	found, _, err = n.Find(ctx, "foo")
+	_, found, err = n.Find(ctx, "foo")
 	require.NoError(t, err)
 	require.False(t, found, "key unexpectedly found")
 }
@@ -719,17 +719,17 @@ func TestSetGet(t *testing.T) {
 	// for k, v := range vals {
 	for _, k := range keys {
 		v := vals[k]
-		found, out, err := n.Find(ctx, k)
+		out, found, err := n.Find(ctx, k)
 		require.NoError(t, err)
 		require.True(t, found, "key not found")
-		if !out.Equal(v) {
+		if !out.Equals(v) {
 			t.Fatal("got wrong value")
 		}
 	}
 	fmt.Println("finds took: ", time.Since(bef))
 
 	for i := 0; i < 100; i++ {
-		found, _, err := n.Find(ctx, randKey())
+		_, found, err := n.Find(ctx, randKey())
 		require.NoError(t, err)
 		require.False(t, found, "expected not found")
 	}
@@ -742,10 +742,10 @@ func TestSetGet(t *testing.T) {
 	}
 
 	for k, v := range vals {
-		found, out, err := n.Find(ctx, k)
+		out, found, err := n.Find(ctx, k)
 		require.NoError(t, err)
 		require.True(t, found, "key not found")
-		if !out.Equal(v) {
+		if !out.Equals(v) {
 			t.Fatal("got wrong value after value change")
 		}
 	}
@@ -761,7 +761,7 @@ func TestSetGet(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, found, "key not found")
 
-		found, _, err = n.Find(ctx, k)
+		_, found, err = n.Find(ctx, k)
 		require.NoError(t, err)
 		require.False(t, found, "expected not found")
 	}
@@ -871,11 +871,11 @@ func TestCopyWithoutFlush(t *testing.T) {
 	for i := 0; i < count; i++ {
 		key := fmt.Sprintf("key%d", i)
 
-		found, val, err := n.Find(ctx, key)
+		val, found, err := n.Find(ctx, key)
 		require.NoError(t, err)
 		require.True(t, found, "key not found")
 
-		found, valCopy, err := nc.Find(ctx, key)
+		valCopy, found, err := nc.Find(ctx, key)
 		require.NoError(t, err)
 		require.True(t, found, "key not found")
 
@@ -956,7 +956,7 @@ func TestMalformedHamt(t *testing.T) {
 		return n
 	}
 	find := func(key []byte, expected []byte) *[]byte {
-		found, vg, err := load().Find(ctx, string(key))
+		vg, found, err := load().Find(ctx, string(key))
 		require.NoError(t, err)
 		require.True(t, found, "key not found")
 
@@ -1140,7 +1140,7 @@ func TestMalformedHamt(t *testing.T) {
 					b(0x58), b(0x27), // bytes(39)
 					ccidBytes)))) // cid
 
-	_, vg, err := load().Find(ctx, string([]byte{0x00, 0x01}))
+	vg, _, err := load().Find(ctx, string([]byte{0x00, 0x01}))
 	// without validation of the child block, this would return not found
 	if err != ErrMalformedHamt || vg != nil {
 		t.Fatal("Should have returned ErrMalformedHamt for its empty child node")
@@ -1152,7 +1152,7 @@ func TestMalformedHamt(t *testing.T) {
 			bcat(b(0x40+1), b(0x01)), // bytes(1) "\x01" (bitmap)
 			bcat(b(0x80+1), // array(1)
 				bucketCbor(kv{0x00, 0x01}))))
-	_, vg, err = load().Find(ctx, string([]byte{0x00, 0x01}))
+	vg, _, err = load().Find(ctx, string([]byte{0x00, 0x01}))
 	// without validation of the child block, this would return not found
 	if err != ErrMalformedHamt || vg != nil {
 		t.Fatal("Should have returned ErrMalformedHamt for its too-small child node")
@@ -1165,7 +1165,7 @@ func TestMalformedHamt(t *testing.T) {
 				bucketCbor(kv{0x00, 0x01}),
 				bucketCbor(kv{0x01, 0x01}),
 				bucketCbor(kv{0x02, 0x01}))))
-	_, vg, err = load().Find(ctx, string([]byte{0x00, 0x01}))
+	vg, _, err = load().Find(ctx, string([]byte{0x00, 0x01}))
 	// without validation of the child block, this would return not found
 	if err != ErrMalformedHamt || vg != nil {
 		t.Fatal("Should have returned ErrMalformedHamt for its too-small child node")
@@ -1185,7 +1185,7 @@ func TestMalformedHamt(t *testing.T) {
 					b(0x58), b(0x27), // bytes(39)
 					ccidBytes)))) // cid
 
-	_, vg, err = load().Find(ctx, string([]byte{0x00, 0x01}))
+	vg, _, err = load().Find(ctx, string([]byte{0x00, 0x01}))
 	// without validation of the child block, this would return not found
 	if err != nil && !bytes.Equal(*vg, []byte{0x40 + 2, 0x00, 0x01}) {
 		t.Fatal("Should have returned found entry")

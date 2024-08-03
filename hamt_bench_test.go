@@ -275,7 +275,7 @@ func doBenchmarkEntriesCount(num int, bitWidth int) func(b *testing.B) {
 			nd, err := LoadNode[*CborByteArray](context.TODO(), cs, c, UseTreeBitWidth(bitWidth))
 			require.NoError(b, err)
 
-			found, _, err := nd.Find(context.TODO(), keys[i%num])
+			_, found, err := nd.Find(context.TODO(), keys[i%num])
 			require.NoError(b, err)
 			require.True(b, found, "key not found")
 		}

@@ -381,15 +381,15 @@ func assertSet(t *testing.T, r *Node[*CborByteArray], i int, val string) {
 
 func assertGet(ctx context.Context, t testing.TB, r *Node[*CborByteArray], i int, val string) {
 	t.Helper()
-	found, _, err := r.Find(ctx, strconv.Itoa(i))
+	_, found, err := r.Find(ctx, strconv.Itoa(i))
 	require.NoError(t, err)
 	require.True(t, found)
 
-	found, out, err := r.Find(ctx, strconv.Itoa(i))
+	out, found, err := r.Find(ctx, strconv.Itoa(i))
 	require.NoError(t, err)
 	require.True(t, found)
 
-	if !out.Equal(cborstr(val)) {
+	if !out.Equals(cborstr(val)) {
 		t.Fatal("value we got out didnt match expectation")
 	}
 }

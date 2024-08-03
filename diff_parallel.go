@@ -320,7 +320,7 @@ func parallelDiffKVs[T HamtValue[T]](pre, cur []*KV[T], out chan *Change[T]) {
 				After:  curVal,
 			}
 		} else {
-			if !preVal.Equal(curVal) {
+			if !preVal.Equals(curVal) {
 				out <- &Change[T]{
 					Type:   Modify,
 					Key:    key,

@@ -33,7 +33,7 @@ const (
 
 type HamtValue[V any] interface {
 	New() V
-	Equal(V) bool
+	Equals(V) bool
 
 	MarshalCBOR(io.Writer) error
 	UnmarshalCBOR(io.Reader) error
@@ -47,7 +47,7 @@ func zero[T any]() T {
 
 // Returns true if the hamt value equals the zero value.
 func isHamtValueZero[T HamtValue[T]](v T) bool {
-	return v.Equal(zero[T]())
+	return v.Equals(zero[T]())
 }
 
 //-----------------------------------------------------------------------------
@@ -210,7 +210,7 @@ func NewNode[T HamtValue[T]](cs cbor.IpldStore, options ...Option) (*Node[T], er
 //
 // Depending on the size of the HAMT, this method may load a large number of
 // child nodes via the HAMT's IpldStore.
-func (n *Node[T]) Find(ctx context.Context, k string) (bool, T, error) {
+func (n *Node[T]) Find(ctx context.Context, k string) (T, bool, error) {
 	var found bool
 	var out T
 	err := n.getValue(ctx, &hashBits{b: n.hash([]byte(k))}, k, func(kv *KV[T]) error {
@@ -218,7 +218,7 @@ func (n *Node[T]) Find(ctx context.Context, k string) (bool, T, error) {
 		out = kv.Value
 		return nil
 	})
-	return found, out, err
+	return out, found, err
 }
 
 // Delete removes an entry from the HAMT structure.
@@ -717,7 +717,7 @@ func (n *Node[T]) modifyValue(ctx context.Context, hv *hashBits, k []byte, v T, 
 	// modify existing, check if key already exists
 	for _, p := range child.KVs {
 		if bytes.Equal(p.Key, k) {
-			if bool(replace) && !p.Value.Equal(v) {
+			if bool(replace) && !p.Value.Equals(v) {
 				p.Value = v
 				return MODIFIED, nil
 			}

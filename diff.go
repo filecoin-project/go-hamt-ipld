@@ -207,7 +207,7 @@ func diffKVs[T HamtValue[T]](pre, cur []*KV[T], idx int) []*Change[T] {
 				After:  curVal,
 			})
 		} else {
-			if !preVal.Equal(curVal) {
+			if !preVal.Equals(curVal) {
 				changes = append(changes, &Change[T]{
 					Type:   Modify,
 					Key:    key,

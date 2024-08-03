@@ -31,7 +31,7 @@ func (c *CborByteArray) New() *CborByteArray {
 	return new(CborByteArray)
 }
 
-func (c *CborByteArray) Equal(o *CborByteArray) bool {
+func (c *CborByteArray) Equals(o *CborByteArray) bool {
 	if c == nil && o == nil {
 		return true
 	}
@@ -78,7 +78,7 @@ func (c *CborInt) New() *CborInt {
 	return new(CborInt)
 }
 
-func (c *CborInt) Equal(o *CborInt) bool {
+func (c *CborInt) Equals(o *CborInt) bool {
 	if c == nil && o == nil {
 		return true
 	}
