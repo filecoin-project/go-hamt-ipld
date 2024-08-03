@@ -27,6 +27,10 @@ func b(b byte) []byte { return []byte{b} }
 // A CBOR-marshalable byte array.
 type CborByteArray []byte
 
+func (c *CborByteArray) New() *CborByteArray {
+	return new(CborByteArray)
+}
+
 func (c *CborByteArray) Equal(o *CborByteArray) bool {
 	if c == nil && o == nil {
 		return true
@@ -69,6 +73,10 @@ func cborstr(s string) *CborByteArray {
 }
 
 type CborInt int64
+
+func (c *CborInt) New() *CborInt {
+	return new(CborInt)
+}
 
 func (c *CborInt) Equal(o *CborInt) bool {
 	if c == nil && o == nil {

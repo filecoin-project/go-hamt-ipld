@@ -18,7 +18,7 @@ var _ = xerrors.Errorf
 
 var lengthBufNode = []byte{130}
 
-func (t *Node[V, T]) MarshalCBOR(w io.Writer) error {
+func (t *Node[T]) MarshalCBOR(w io.Writer) error {
 	if t == nil {
 		_, err := w.Write(cbg.CborNull)
 		return err
@@ -61,8 +61,8 @@ func (t *Node[V, T]) MarshalCBOR(w io.Writer) error {
 	return nil
 }
 
-func (t *Node[V, T]) UnmarshalCBOR(r io.Reader) (err error) {
-	*t = Node[V, T]{}
+func (t *Node[T]) UnmarshalCBOR(r io.Reader) (err error) {
+	*t = Node[T]{}
 
 	cr := cbg.NewCborReader(r)
 
@@ -124,12 +124,12 @@ func (t *Node[V, T]) UnmarshalCBOR(r io.Reader) (err error) {
 	}
 
 	if extra > 0 {
-		t.Pointers = make([]*Pointer[V, T], extra)
+		t.Pointers = make([]*Pointer[T], extra)
 	}
 
 	for i := 0; i < int(extra); i++ {
 
-		var v Pointer[V, T]
+		var v Pointer[T]
 		if err := v.UnmarshalCBOR(cr); err != nil {
 			return err
 		}
@@ -142,7 +142,7 @@ func (t *Node[V, T]) UnmarshalCBOR(r io.Reader) (err error) {
 
 var lengthBufKV = []byte{130}
 
-func (t *KV[V, T]) MarshalCBOR(w io.Writer) error {
+func (t *KV[T]) MarshalCBOR(w io.Writer) error {
 	if t == nil {
 		_, err := w.Write(cbg.CborNull)
 		return err
@@ -174,8 +174,8 @@ func (t *KV[V, T]) MarshalCBOR(w io.Writer) error {
 	return nil
 }
 
-func (t *KV[V, T]) UnmarshalCBOR(r io.Reader) (err error) {
-	*t = KV[V, T]{}
+func (t *KV[T]) UnmarshalCBOR(r io.Reader) (err error) {
+	*t = KV[T]{}
 
 	cr := cbg.NewCborReader(r)
 
@@ -223,7 +223,8 @@ func (t *KV[V, T]) UnmarshalCBOR(r io.Reader) (err error) {
 
 	{
 
-		var value T = new(V)
+		var value T
+		value = value.New()
 		if err := value.UnmarshalCBOR(cr); err != nil {
 			return xerrors.Errorf("failed to read field: %w", err)
 		}
