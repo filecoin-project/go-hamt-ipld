@@ -130,11 +130,10 @@ func randKey() string {
 	return hex.EncodeToString(buf)
 }
 
-func randValue() **CborByteArray {
+func randValue() *CborByteArray {
 	buf := CborByteArray(make([]byte, 30))
 	crand.Read(buf)
-	v := &buf
-	return &v
+	return &buf
 }
 
 /*
@@ -360,7 +359,7 @@ func TestFillAndCollapse(t *testing.T) {
 
 func addAndRemoveKeys(t *testing.T, keys []string, extraKeys []string, options ...Option) {
 	ctx := context.Background()
-	vals := make(map[string]**CborByteArray)
+	vals := make(map[string]*CborByteArray)
 	for i := 0; i < len(keys); i++ {
 		s := keys[i]
 		vals[s] = randValue()
@@ -394,7 +393,7 @@ func addAndRemoveKeys(t *testing.T, keys []string, extraKeys []string, options .
 		found, out, err := n.Find(ctx, k)
 		require.NoError(t, err)
 		require.True(t, found, "key not found")
-		if !out.Equal(*v) {
+		if !out.Equal(v) {
 			t.Fatalf("got wrong value after value change: %x != %x", out, v)
 		}
 	}
@@ -562,7 +561,7 @@ func testBasic(t *testing.T, options ...Option) {
 	found, out, err := n.Find(ctx, "foo")
 	require.NoError(t, err)
 	require.True(t, found, "key not found")
-	if !out.Equal(*val) {
+	if !out.Equal(val) {
 		t.Fatal("out bytes were wrong: ", out)
 	}
 }
@@ -676,7 +675,7 @@ func TestDelete(t *testing.T) {
 
 func TestSetGet(t *testing.T) {
 	ctx := context.Background()
-	vals := make(map[string]**CborByteArray)
+	vals := make(map[string]*CborByteArray)
 	var keys []string
 	for i := 0; i < 100000; i++ {
 		s := randKey()
@@ -697,7 +696,7 @@ func TestSetGet(t *testing.T) {
 	require.NoError(t, err)
 	mapsize := 0
 	for k, v := range vals {
-		mapsize += (len(k) + len(**v))
+		mapsize += (len(k) + len(*v))
 	}
 	fmt.Printf("Total size is: %d, size of keys+vals: %d, overhead: %.2f\n", size, mapsize, float64(size)/float64(mapsize))
 	fmt.Println(stats(begn))
@@ -723,7 +722,7 @@ func TestSetGet(t *testing.T) {
 		found, out, err := n.Find(ctx, k)
 		require.NoError(t, err)
 		require.True(t, found, "key not found")
-		if !out.Equal(*v) {
+		if !out.Equal(v) {
 			t.Fatal("got wrong value")
 		}
 	}
@@ -746,7 +745,7 @@ func TestSetGet(t *testing.T) {
 		found, out, err := n.Find(ctx, k)
 		require.NoError(t, err)
 		require.True(t, found, "key not found")
-		if !out.Equal(*v) {
+		if !out.Equal(v) {
 			t.Fatal("got wrong value after value change")
 		}
 	}
@@ -855,8 +854,7 @@ func TestCopyWithoutFlush(t *testing.T) {
 
 	for i := 0; i < count; i++ {
 		v := CborInt(i)
-		pv := &v
-		err := n.Set(ctx, fmt.Sprintf("key%d", i), &pv)
+		err := n.Set(ctx, fmt.Sprintf("key%d", i), &v)
 		require.NoError(t, err)
 	}
 
@@ -864,8 +862,7 @@ func TestCopyWithoutFlush(t *testing.T) {
 
 	for i := 0; i < count; i++ {
 		v := CborInt(count + i)
-		pv := &v
-		err := n.Set(ctx, fmt.Sprintf("key%d", i), &pv)
+		err := n.Set(ctx, fmt.Sprintf("key%d", i), &v)
 		require.NoError(t, err)
 	}
 
@@ -1240,7 +1237,7 @@ func TestCleanChildOrdering(t *testing.T) {
 	require.NoError(t, err)
 
 	for i := uint64(100); i < uint64(195); i++ {
-		err := h.Set(ctx, makeKey(i), &dummyValue)
+		err := h.Set(ctx, makeKey(i), dummyValue)
 		require.NoError(t, err)
 	}
 
@@ -1293,7 +1290,7 @@ func TestPutOrderIndependent(t *testing.T) {
 	nKeys := 32 * 32 * 2
 
 	for i := uint64(1); i < uint64(nKeys); i++ {
-		err := h.Set(ctx, makeKey(i), &dummyValue)
+		err := h.Set(ctx, makeKey(i), dummyValue)
 		require.NoError(t, err)
 	}
 
@@ -1320,7 +1317,7 @@ func TestPutOrderIndependent(t *testing.T) {
 		})
 
 		for _, k := range vals {
-			h.Set(ctx, makeKey(uint64(k)), &newDummyValue)
+			h.Set(ctx, makeKey(uint64(k)), newDummyValue)
 		}
 
 		require.NoError(t, h.Flush(ctx))
@@ -1357,7 +1354,7 @@ func TestDeleteOrderIndependent(t *testing.T) {
 	nKeys := 32 * 32 * 2
 
 	for i := uint64(1); i < uint64(nKeys); i++ {
-		err := h.Set(ctx, makeKey(i), &dummyValue)
+		err := h.Set(ctx, makeKey(i), dummyValue)
 		require.NoError(t, err)
 	}
 

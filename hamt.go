@@ -31,10 +31,23 @@ const (
 	UNMODIFIED = modified(false)
 )
 
-type HamtValue[T any] interface {
-	Equal(T) bool
+type HamtValue[V any] interface {
+	New() V
+	Equal(V) bool
+
 	MarshalCBOR(io.Writer) error
 	UnmarshalCBOR(io.Reader) error
+}
+
+// Return the nil/zero value of T.
+func zero[T any]() T {
+	var zero T
+	return zero
+}
+
+// Returns true if the hamt value equals the zero value.
+func isHamtValueZero[T HamtValue[T]](v T) bool {
+	return v.Equal(zero[T]())
 }
 
 //-----------------------------------------------------------------------------
@@ -220,7 +233,8 @@ func (n *Node[T]) Find(ctx context.Context, k string) (bool, T, error) {
 // further nodes.
 func (n *Node[T]) Delete(ctx context.Context, k string) (bool, error) {
 	kb := []byte(k)
-	modified, err := n.modifyValue(ctx, &hashBits{b: n.hash(kb)}, kb, nil, OVERWRITE)
+	var empty T
+	modified, err := n.modifyValue(ctx, &hashBits{b: n.hash(kb)}, kb, empty, OVERWRITE)
 	return modified == MODIFIED, err
 }
 
@@ -524,7 +538,7 @@ func (n *Node[T]) Flush(ctx context.Context) error {
 // To fully commit the change, it is necessary to Flush the root Node,
 // and then additionally Put the root node to the store itself,
 // and save the resulting CID wherever you expect the HAMT root to persist.
-func (n *Node[T]) Set(ctx context.Context, k string, v *T) error {
+func (n *Node[T]) Set(ctx context.Context, k string, v T) error {
 	keyBytes := []byte(k)
 	_, err := n.modifyValue(ctx, &hashBits{b: n.hash(keyBytes)}, keyBytes, v, OVERWRITE)
 	return err
@@ -533,7 +547,7 @@ func (n *Node[T]) Set(ctx context.Context, k string, v *T) error {
 // SetIfAbsent sets key k to value v only if k is not already set to some value.
 // Returns true if the value mapped to k is changed by this operation
 // false otherwise.
-func (n *Node[T]) SetIfAbsent(ctx context.Context, k string, v *T) (bool, error) {
+func (n *Node[T]) SetIfAbsent(ctx context.Context, k string, v T) (bool, error) {
 	keyBytes := []byte(k)
 	modified, err := n.modifyValue(ctx, &hashBits{b: n.hash(keyBytes)}, keyBytes, v, NOVERWRITE)
 	return bool(modified), err
@@ -619,7 +633,7 @@ func (n *Node[T]) cleanChild(chnd *Node[T], cindex byte) error {
 // cleanNode()). Recursive calls use the same arguments on child nodes but
 // note that `hv.Next()` is not idempotent. Each call will increment the number
 // of bits chomped off the hash digest for this key.
-func (n *Node[T]) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *T, replace overwrite) (modified, error) {
+func (n *Node[T]) modifyValue(ctx context.Context, hv *hashBits, k []byte, v T, replace overwrite) (modified, error) {
 	idx, err := hv.Next(n.bitWidth)
 	if err != nil {
 		return UNMODIFIED, ErrMaxDepth
@@ -629,10 +643,10 @@ func (n *Node[T]) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *T,
 	// doesn't exist in the HAMT already and can insert it at the appropriate
 	// position.
 	if n.Bitfield.Bit(idx) != 1 {
-		if v == nil { // Delete absent key
+		if isHamtValueZero(v) { // Delete absent key
 			return UNMODIFIED, nil
 		}
-		return MODIFIED, n.insertKV(idx, k, *v)
+		return MODIFIED, n.insertKV(idx, k, v)
 	}
 
 	// otherwise, the value is either local or in a child
@@ -669,7 +683,7 @@ func (n *Node[T]) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *T,
 		// current data it contains. This may involve collapsing child nodes if
 		// they no longer contain enough elements to justify their stand-alone
 		// existence.
-		if v == nil {
+		if isHamtValueZero(v) {
 			if err := n.cleanChild(chnd, cindex); err != nil {
 				return UNMODIFIED, err
 			}
@@ -682,7 +696,7 @@ func (n *Node[T]) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *T,
 	// modified (or deleted) here or needs to be added as a new child node if
 	// there is an overflow.
 
-	if v == nil {
+	if isHamtValueZero(v) {
 		// delete operation, find the child and remove it, compacting the bucket in
 		// the process
 		for i, p := range child.KVs {
@@ -703,8 +717,8 @@ func (n *Node[T]) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *T,
 	// modify existing, check if key already exists
 	for _, p := range child.KVs {
 		if bytes.Equal(p.Key, k) {
-			if bool(replace) && !p.Value.Equal(*v) {
-				p.Value = *v
+			if bool(replace) && !p.Value.Equal(v) {
+				p.Value = v
 				return MODIFIED, nil
 			}
 			return UNMODIFIED, nil
@@ -722,7 +736,7 @@ func (n *Node[T]) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *T,
 
 		for _, p := range child.KVs {
 			chhv := &hashBits{b: n.hash(p.Key), consumed: hv.consumed}
-			if _, err := sub.modifyValue(ctx, chhv, p.Key, &p.Value, replace); err != nil {
+			if _, err := sub.modifyValue(ctx, chhv, p.Key, p.Value, replace); err != nil {
 				return UNMODIFIED, err
 			}
 		}
@@ -732,7 +746,7 @@ func (n *Node[T]) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *T,
 
 	// otherwise insert the new element into the array in order, the ordering is
 	// important to retain canonical form
-	np := &KV[T]{Key: k, Value: *v}
+	np := &KV[T]{Key: k, Value: v}
 	for i := 0; i < len(child.KVs); i++ {
 		if bytes.Compare(k, child.KVs[i].Key) < 0 {
 			child.KVs = append(child.KVs[:i], append([]*KV[T]{np}, child.KVs[i:]...)...)

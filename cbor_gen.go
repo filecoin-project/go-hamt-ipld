@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"reflect"
 	"sort"
 
 	cid "github.com/ipfs/go-cid"
@@ -218,8 +217,8 @@ func (t *KV[T]) UnmarshalCBOR(r io.Reader) (err error) {
 	// t.Value (typegen.Deferred) (struct)
 
 	{
-		valueType := reflect.TypeOf(t.Value).Elem()
-		value := reflect.New(valueType).Interface().(T)
+		var value T
+		value = value.New()
 		if err := value.UnmarshalCBOR(cr); err != nil {
 			return xerrors.Errorf("failed to read field: %w", err)
 		}

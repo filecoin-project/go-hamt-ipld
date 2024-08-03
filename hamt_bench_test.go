@@ -25,11 +25,11 @@ func (r *rander) randString() string {
 	return hex.EncodeToString(buf)
 }
 
-func (r *rander) randValue() **CborByteArray {
+func (r *rander) randValue() *CborByteArray {
 	buf := CborByteArray(make([]byte, 30))
 	crand.Read(buf)
 	v := &buf
-	return &v
+	return v
 }
 
 func BenchmarkSerializeNode(b *testing.B) {

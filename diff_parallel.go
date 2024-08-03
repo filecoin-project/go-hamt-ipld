@@ -256,8 +256,8 @@ func (s *diffScheduler[T]) work(ctx context.Context, todo *task[T], results chan
 				results <- &Change[T]{
 					Type:   Remove,
 					Key:    string(p.Key),
-					Before: &p.Value,
-					After:  nil,
+					Before: p.Value,
+					After:  zero[T](),
 				}
 			}
 		}
@@ -279,8 +279,8 @@ func (s *diffScheduler[T]) work(ctx context.Context, todo *task[T], results chan
 				results <- &Change[T]{
 					Type:   Add,
 					Key:    string(p.Key),
-					Before: nil,
-					After:  &p.Value,
+					Before: zero[T](),
+					After:  p.Value,
 				}
 			}
 		}
@@ -289,14 +289,14 @@ func (s *diffScheduler[T]) work(ctx context.Context, todo *task[T], results chan
 }
 
 func parallelDiffKVs[T HamtValue[T]](pre, cur []*KV[T], out chan *Change[T]) {
-	preMap := make(map[string]*T, len(pre))
-	curMap := make(map[string]*T, len(cur))
+	preMap := make(map[string]T, len(pre))
+	curMap := make(map[string]T, len(cur))
 
 	for _, kv := range pre {
-		preMap[string(kv.Key)] = &kv.Value
+		preMap[string(kv.Key)] = kv.Value
 	}
 	for _, kv := range cur {
-		curMap[string(kv.Key)] = &kv.Value
+		curMap[string(kv.Key)] = kv.Value
 	}
 	// find removed keys: keys in pre and not in cur
 	for key, value := range preMap {
@@ -305,7 +305,7 @@ func parallelDiffKVs[T HamtValue[T]](pre, cur []*KV[T], out chan *Change[T]) {
 				Type:   Remove,
 				Key:    key,
 				Before: value,
-				After:  nil,
+				After:  zero[T](),
 			}
 		}
 	}
@@ -316,11 +316,11 @@ func parallelDiffKVs[T HamtValue[T]](pre, cur []*KV[T], out chan *Change[T]) {
 			out <- &Change[T]{
 				Type:   Add,
 				Key:    key,
-				Before: nil,
+				Before: zero[T](),
 				After:  curVal,
 			}
 		} else {
-			if !(*preVal).Equal(*curVal) {
+			if !preVal.Equal(curVal) {
 				out <- &Change[T]{
 					Type:   Modify,
 					Key:    key,
@@ -337,8 +337,8 @@ func parallelAddAll[T HamtValue[T]](ctx context.Context, node *Node[T], out chan
 		out <- &Change[T]{
 			Type:   Add,
 			Key:    k,
-			Before: nil,
-			After:  &val,
+			Before: zero[T](),
+			After:  val,
 		}
 		return nil
 	})
@@ -349,8 +349,8 @@ func parallelRemoveAll[T HamtValue[T]](ctx context.Context, node *Node[T], out c
 		out <- &Change[T]{
 			Type:   Remove,
 			Key:    k,
-			Before: &val,
-			After:  nil,
+			Before: val,
+			After:  zero[T](),
 		}
 		return nil
 	})

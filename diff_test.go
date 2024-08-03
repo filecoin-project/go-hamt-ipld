@@ -389,7 +389,7 @@ func assertGet(ctx context.Context, t testing.TB, r *Node[*CborByteArray], i int
 	require.NoError(t, err)
 	require.True(t, found)
 
-	if !out.Equal(*cborstr(val)) {
+	if !out.Equal(cborstr(val)) {
 		t.Fatal("value we got out didnt match expectation")
 	}
 }

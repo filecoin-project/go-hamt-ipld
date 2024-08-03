@@ -24,8 +24,8 @@ const (
 type Change[T HamtValue[T]] struct {
 	Type   ChangeType
 	Key    string
-	Before *T
-	After  *T
+	Before T
+	After  T
 }
 
 func (ch Change[T]) String() string {
@@ -139,8 +139,8 @@ func diffNode[T HamtValue[T]](ctx context.Context, pre, cur *Node[T], depth int)
 					changes = append(changes, &Change[T]{
 						Type:   Remove,
 						Key:    string(p.Key),
-						Before: &p.Value,
-						After:  nil,
+						Before: p.Value,
+						After:  zero[T](),
 					})
 				}
 			}
@@ -163,8 +163,8 @@ func diffNode[T HamtValue[T]](ctx context.Context, pre, cur *Node[T], depth int)
 					changes = append(changes, &Change[T]{
 						Type:   Add,
 						Key:    string(p.Key),
-						Before: nil,
-						After:  &p.Value,
+						Before: zero[T](),
+						After:  p.Value,
 					})
 				}
 			}
@@ -175,15 +175,15 @@ func diffNode[T HamtValue[T]](ctx context.Context, pre, cur *Node[T], depth int)
 }
 
 func diffKVs[T HamtValue[T]](pre, cur []*KV[T], idx int) []*Change[T] {
-	preMap := make(map[string]*T, len(pre))
-	curMap := make(map[string]*T, len(cur))
+	preMap := make(map[string]T, len(pre))
+	curMap := make(map[string]T, len(cur))
 	var changes []*Change[T]
 
 	for _, kv := range pre {
-		preMap[string(kv.Key)] = &kv.Value
+		preMap[string(kv.Key)] = kv.Value
 	}
 	for _, kv := range cur {
-		curMap[string(kv.Key)] = &kv.Value
+		curMap[string(kv.Key)] = kv.Value
 	}
 	// find removed keys: keys in pre and not in cur
 	for key, value := range preMap {
@@ -192,7 +192,7 @@ func diffKVs[T HamtValue[T]](pre, cur []*KV[T], idx int) []*Change[T] {
 				Type:   Remove,
 				Key:    key,
 				Before: value,
-				After:  nil,
+				After:  zero[T](),
 			})
 		}
 	}
@@ -203,11 +203,11 @@ func diffKVs[T HamtValue[T]](pre, cur []*KV[T], idx int) []*Change[T] {
 			changes = append(changes, &Change[T]{
 				Type:   Add,
 				Key:    key,
-				Before: nil,
+				Before: zero[T](),
 				After:  curVal,
 			})
 		} else {
-			if !(*preVal).Equal(*curVal) {
+			if !preVal.Equal(curVal) {
 				changes = append(changes, &Change[T]{
 					Type:   Modify,
 					Key:    key,
@@ -226,8 +226,8 @@ func addAll[T HamtValue[T]](ctx context.Context, node *Node[T], idx int) ([]*Cha
 		changes = append(changes, &Change[T]{
 			Type:   Add,
 			Key:    k,
-			Before: nil,
-			After:  &val,
+			Before: zero[T](),
+			After:  val,
 		})
 
 		return nil
@@ -243,8 +243,8 @@ func removeAll[T HamtValue[T]](ctx context.Context, node *Node[T], idx int) ([]*
 		changes = append(changes, &Change[T]{
 			Type:   Remove,
 			Key:    k,
-			Before: &val,
-			After:  nil,
+			Before: val,
+			After:  zero[T](),
 		})
 
 		return nil

@@ -18,6 +18,7 @@ func main() {
 
 type dummy int64
 
+func (d dummy) New() *dummy                    { return nil }
 func (d *dummy) Equal(*dummy) bool             { return false }
 func (d dummy) MarshalCBOR(io.Writer) error    { return nil }
 func (d *dummy) UnmarshalCBOR(io.Reader) error { return nil }
