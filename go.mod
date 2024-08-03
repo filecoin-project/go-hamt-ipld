@@ -1,4 +1,4 @@
-module github.com/filecoin-project/go-hamt-ipld/v3
+module github.com/filecoin-project/go-hamt-ipld/v4
 
 require (
 	github.com/ipfs/go-block-format v0.2.0
