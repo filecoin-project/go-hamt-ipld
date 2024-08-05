@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"sort"
 
 	cid "github.com/ipfs/go-cid"
 	cbor "github.com/ipfs/go-ipld-cbor"
+	cbg "github.com/whyrusleeping/cbor-gen"
 )
 
 // -----------------------------------------------------------------------------
@@ -35,11 +35,8 @@ const (
 // the HAMT. It is used to create new instances of the value type, to
 // compare values for equality and to handle serialization.
 type HamtValue[V any] interface {
-	New() V
+	cbg.CBORSerializer[V]
 	Equals(V) bool
-
-	MarshalCBOR(io.Writer) error
-	UnmarshalCBOR(io.Reader) error
 }
 
 // Return the nil/zero value of T.

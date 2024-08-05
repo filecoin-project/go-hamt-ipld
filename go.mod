@@ -34,3 +34,5 @@ require (
 )
 
 go 1.21
+
+replace github.com/whyrusleeping/cbor-gen => github.com/rvagg/cbor-gen v0.0.0-20240806101617-39e34ed2fd5d
