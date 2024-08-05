@@ -13,7 +13,7 @@ import (
 // associated array. Indexes `[1]` and `[2]` are not present, but index `[3]`
 // is at the second position of our Pointers array.
 func (n *Node) indexForBitPos(bp int) int {
-	return indexForBitPos(bp, n.Bitfield)
+	return indexForBitPos(bp, &n.Bitfield.Int)
 }
 
 func indexForBitPos(bp int, bitfield *big.Int) int {

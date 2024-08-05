@@ -5,18 +5,18 @@ package hamt
 import (
 	"fmt"
 	"io"
-	"math/big"
+	"math"
+	"sort"
 
+	cid "github.com/ipfs/go-cid"
 	cbg "github.com/whyrusleeping/cbor-gen"
 	xerrors "golang.org/x/xerrors"
 )
 
-// NOTE: This is a generated file, but it has been modified to encode the
-// bitfield big.Int as a byte array. The bitfield is only a big.Int because
-// thats a convenient type for the operations we need to perform on it, but it
-// is fundamentally an array of bytes (bits)
-
 var _ = xerrors.Errorf
+var _ = cid.Undef
+var _ = math.E
+var _ = sort.Sort
 
 var lengthBufNode = []byte{130}
 
@@ -25,29 +25,20 @@ func (t *Node) MarshalCBOR(w io.Writer) error {
 		_, err := w.Write(cbg.CborNull)
 		return err
 	}
-	if _, err := w.Write(lengthBufNode); err != nil {
-		return err
-	}
 
 	cw := cbg.NewCborWriter(w)
 
-	// t.Bitfield (big.Int) (struct)
-	{
-		var b []byte
-		if t.Bitfield != nil {
-			b = t.Bitfield.Bytes()
-		}
+	if _, err := cw.Write(lengthBufNode); err != nil {
+		return err
+	}
 
-		if err := cw.WriteMajorTypeHeader(cbg.MajByteString, uint64(len(b))); err != nil {
-			return err
-		}
-		if _, err := w.Write(b); err != nil {
-			return err
-		}
+	// t.Bitfield (hamt.Bitfield) (struct)
+	if err := t.Bitfield.MarshalCBOR(cw); err != nil {
+		return err
 	}
 
 	// t.Pointers ([]*hamt.Pointer) (slice)
-	if len(t.Pointers) > cbg.MaxLength {
+	if len(t.Pointers) > 8192 {
 		return xerrors.Errorf("Slice value in field t.Pointers was too long")
 	}
 
@@ -55,14 +46,15 @@ func (t *Node) MarshalCBOR(w io.Writer) error {
 		return err
 	}
 	for _, v := range t.Pointers {
-		if err := v.MarshalCBOR(w); err != nil {
+		if err := v.MarshalCBOR(cw); err != nil {
 			return err
 		}
+
 	}
 	return nil
 }
 
-func (t *Node) UnmarshalCBOR(r io.Reader) error {
+func (t *Node) UnmarshalCBOR(r io.Reader) (err error) {
 	*t = Node{}
 
 	cr := cbg.NewCborReader(r)
@@ -71,6 +63,12 @@ func (t *Node) UnmarshalCBOR(r io.Reader) error {
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if err == io.EOF {
+			err = io.ErrUnexpectedEOF
+		}
+	}()
+
 	if maj != cbg.MajArray {
 		return fmt.Errorf("cbor input should be of type array")
 	}
@@ -79,29 +77,14 @@ func (t *Node) UnmarshalCBOR(r io.Reader) error {
 		return fmt.Errorf("cbor input had wrong number of fields")
 	}
 
-	// t.Bitfield (big.Int) (struct)
+	// t.Bitfield (hamt.Bitfield) (struct)
 
-	maj, extra, err = cr.ReadHeader()
-	if err != nil {
-		return err
-	}
+	{
 
-	if maj != cbg.MajByteString {
-		return fmt.Errorf("big ints should be tagged cbor byte strings")
-	}
-
-	if extra > 256 {
-		return fmt.Errorf("t.Bitfield: cbor bignum was too large")
-	}
-
-	if extra > 0 {
-		buf := make([]byte, extra)
-		if _, err := io.ReadFull(cr, buf); err != nil {
-			return err
+		if err := t.Bitfield.UnmarshalCBOR(cr); err != nil {
+			return xerrors.Errorf("unmarshaling t.Bitfield: %w", err)
 		}
-		t.Bitfield = big.NewInt(0).SetBytes(buf)
-	} else {
-		t.Bitfield = big.NewInt(0)
+
 	}
 	// t.Pointers ([]*hamt.Pointer) (slice)
 
@@ -110,7 +93,7 @@ func (t *Node) UnmarshalCBOR(r io.Reader) error {
 		return err
 	}
 
-	if extra > cbg.MaxLength {
+	if extra > 8192 {
 		return fmt.Errorf("t.Pointers: array too large (%d)", extra)
 	}
 
@@ -123,15 +106,34 @@ func (t *Node) UnmarshalCBOR(r io.Reader) error {
 	}
 
 	for i := 0; i < int(extra); i++ {
+		{
+			var maj byte
+			var extra uint64
+			var err error
+			_ = maj
+			_ = extra
+			_ = err
 
-		var v Pointer
-		if err := v.UnmarshalCBOR(cr); err != nil {
-			return err
+			{
+
+				b, err := cr.ReadByte()
+				if err != nil {
+					return err
+				}
+				if b != cbg.CborNull[0] {
+					if err := cr.UnreadByte(); err != nil {
+						return err
+					}
+					t.Pointers[i] = new(Pointer)
+					if err := t.Pointers[i].UnmarshalCBOR(cr); err != nil {
+						return xerrors.Errorf("unmarshaling t.Pointers[i] pointer: %w", err)
+					}
+				}
+
+			}
+
 		}
-
-		t.Pointers[i] = &v
 	}
-
 	return nil
 }
 
@@ -142,14 +144,15 @@ func (t *KV) MarshalCBOR(w io.Writer) error {
 		_, err := w.Write(cbg.CborNull)
 		return err
 	}
-	if _, err := w.Write(lengthBufKV); err != nil {
-		return err
-	}
 
 	cw := cbg.NewCborWriter(w)
 
+	if _, err := cw.Write(lengthBufKV); err != nil {
+		return err
+	}
+
 	// t.Key ([]uint8) (slice)
-	if len(t.Key) > cbg.ByteArrayMaxLen {
+	if len(t.Key) > 2097152 {
 		return xerrors.Errorf("Byte array in field t.Key was too long")
 	}
 
@@ -157,18 +160,18 @@ func (t *KV) MarshalCBOR(w io.Writer) error {
 		return err
 	}
 
-	if _, err := w.Write(t.Key[:]); err != nil {
+	if _, err := cw.Write(t.Key); err != nil {
 		return err
 	}
 
 	// t.Value (typegen.Deferred) (struct)
-	if err := t.Value.MarshalCBOR(w); err != nil {
+	if err := t.Value.MarshalCBOR(cw); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (t *KV) UnmarshalCBOR(r io.Reader) error {
+func (t *KV) UnmarshalCBOR(r io.Reader) (err error) {
 	*t = KV{}
 
 	cr := cbg.NewCborReader(r)
@@ -177,6 +180,12 @@ func (t *KV) UnmarshalCBOR(r io.Reader) error {
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if err == io.EOF {
+			err = io.ErrUnexpectedEOF
+		}
+	}()
+
 	if maj != cbg.MajArray {
 		return fmt.Errorf("cbor input should be of type array")
 	}
@@ -192,7 +201,7 @@ func (t *KV) UnmarshalCBOR(r io.Reader) error {
 		return err
 	}
 
-	if extra > cbg.ByteArrayMaxLen {
+	if extra > 2097152 {
 		return fmt.Errorf("t.Key: byte array too large (%d)", extra)
 	}
 	if maj != cbg.MajByteString {
@@ -200,12 +209,13 @@ func (t *KV) UnmarshalCBOR(r io.Reader) error {
 	}
 
 	if extra > 0 {
-		t.Key = make([]byte, extra)
+		t.Key = make([]uint8, extra)
 	}
 
-	if _, err := io.ReadFull(cr, t.Key[:]); err != nil {
+	if _, err := io.ReadFull(cr, t.Key); err != nil {
 		return err
 	}
+
 	// t.Value (typegen.Deferred) (struct)
 
 	{

@@ -33,7 +33,7 @@ func newMockBlocks() *mockBlocks {
 	return &mockBlocks{make(map[cid.Cid]block.Block), sync.Mutex{}, blockstoreStats{}}
 }
 
-func (mb *mockBlocks) Get(c cid.Cid) (block.Block, error) {
+func (mb *mockBlocks) Get(_ context.Context, c cid.Cid) (block.Block, error) {
 	mb.dataMu.Lock()
 	defer mb.dataMu.Unlock()
 	mb.stats.evtcntGet++
@@ -44,7 +44,7 @@ func (mb *mockBlocks) Get(c cid.Cid) (block.Block, error) {
 	return nil, fmt.Errorf("Not Found")
 }
 
-func (mb *mockBlocks) Put(b block.Block) error {
+func (mb *mockBlocks) Put(_ context.Context, b block.Block) error {
 	mb.dataMu.Lock()
 	defer mb.dataMu.Unlock()
 	mb.stats.evtcntPut++

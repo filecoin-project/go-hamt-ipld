@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"math/big"
 	"sort"
 
 	cid "github.com/ipfs/go-cid"
@@ -81,7 +80,7 @@ type HashFunc func([]byte) []byte
 //		pointers [Pointer]
 //	} representation tuple
 type Node struct {
-	Bitfield *big.Int
+	Bitfield Bitfield
 	Pointers []*Pointer
 
 	bitWidth int
@@ -237,7 +236,6 @@ func (n *Node) Delete(ctx context.Context, k string) (bool, error) {
 // Constructs a new node value.
 func newNode(cs cbor.IpldStore, hashFn HashFunc, bitWidth int) *Node {
 	nd := &Node{
-		Bitfield: big.NewInt(0),
 		Pointers: make([]*Pointer, 0),
 		bitWidth: bitWidth,
 		hash:     hashFn,
@@ -385,6 +383,11 @@ func loadNode(
 	}
 
 	for _, ch := range out.Pointers {
+		if ch == nil {
+			// Cannot have nil pointers.
+			return nil, ErrMalformedHamt
+		}
+
 		isLink := ch.isShard()
 		isBucket := ch.KVs != nil
 		if isLink == isBucket {
@@ -398,6 +401,12 @@ func loadNode(
 		if isBucket {
 			if len(ch.KVs) == 0 || len(ch.KVs) > bucketSize {
 				return nil, ErrMalformedHamt
+			}
+			for _, kv := range ch.KVs {
+				if kv == nil {
+					// Cannot have nil pointers kvs.
+					return nil, ErrMalformedHamt
+				}
 			}
 			for i := 1; i < len(ch.KVs); i++ {
 				if bytes.Compare(ch.KVs[i-1].Key, ch.KVs[i].Key) >= 0 {
@@ -776,7 +785,7 @@ func (n *Node) modifyValue(ctx context.Context, hv *hashBits, k []byte, v *cbg.D
 // bucket containing the single key/value pair at that position.
 func (n *Node) insertKV(idx int, k []byte, v *cbg.Deferred) error {
 	i := n.indexForBitPos(idx)
-	n.Bitfield.SetBit(n.Bitfield, idx, 1)
+	n.Bitfield.SetBit(&n.Bitfield.Int, idx, 1)
 
 	p := &Pointer{KVs: []*KV{{Key: k, Value: v}}}
 
@@ -798,7 +807,7 @@ func (n *Node) setPointer(i byte, p *Pointer) error {
 func (n *Node) rmPointer(i byte, idx int) error {
 	copy(n.Pointers[i:], n.Pointers[i+1:])
 	n.Pointers = n.Pointers[:len(n.Pointers)-1]
-	n.Bitfield.SetBit(n.Bitfield, idx, 0)
+	n.Bitfield.SetBit(&n.Bitfield.Int, idx, 0)
 
 	return nil
 }
@@ -824,7 +833,7 @@ func (n *Node) getPointer(i byte) *Pointer {
 func (n *Node) Copy() *Node {
 	// TODO(rvagg): clarify what situations this method is actually useful for.
 	nn := newNode(n.store, n.hash, n.bitWidth)
-	nn.Bitfield.Set(n.Bitfield)
+	nn.Bitfield.Set(&n.Bitfield.Int)
 	nn.Pointers = make([]*Pointer, len(n.Pointers))
 
 	for i, p := range n.Pointers {
