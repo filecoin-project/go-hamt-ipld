@@ -81,11 +81,11 @@ func diffNode[T HamtValue[T]](ctx context.Context, pre, cur *Node[T], depth int)
 				if prePointer.Link == curPointer.Link {
 					continue
 				}
-				preChild, err := prePointer.loadChild(ctx, pre.store, pre.bitWidth, pre.hash, pre.zeroValue)
+				preChild, err := prePointer.loadChild(ctx, pre.store, pre.bitWidth, pre.hash)
 				if err != nil {
 					return nil, err
 				}
-				curChild, err := curPointer.loadChild(ctx, cur.store, cur.bitWidth, cur.hash, pre.zeroValue)
+				curChild, err := curPointer.loadChild(ctx, cur.store, cur.bitWidth, cur.hash)
 				if err != nil {
 					return nil, err
 				}
@@ -99,7 +99,7 @@ func diffNode[T HamtValue[T]](ctx context.Context, pre, cur *Node[T], depth int)
 
 			// check if KV's from cur exists in any children of pre's child.
 			if prePointer.isShard() && !curPointer.isShard() {
-				childKV, err := prePointer.loadChildKVs(ctx, pre.store, pre.bitWidth, pre.hash, pre.zeroValue)
+				childKV, err := prePointer.loadChildKVs(ctx, pre.store, pre.bitWidth, pre.hash)
 				if err != nil {
 					return nil, err
 				}
@@ -109,7 +109,7 @@ func diffNode[T HamtValue[T]](ctx context.Context, pre, cur *Node[T], depth int)
 
 			// check if KV's from pre exists in any children of cur's child.
 			if !prePointer.isShard() && curPointer.isShard() {
-				childKV, err := curPointer.loadChildKVs(ctx, cur.store, cur.bitWidth, cur.hash, pre.zeroValue)
+				childKV, err := curPointer.loadChildKVs(ctx, cur.store, cur.bitWidth, cur.hash)
 				if err != nil {
 					return nil, err
 				}
@@ -125,7 +125,7 @@ func diffNode[T HamtValue[T]](ctx context.Context, pre, cur *Node[T], depth int)
 			pointer := pre.getPointer(byte(pre.indexForBitPos(idx)))
 
 			if pointer.isShard() {
-				child, err := pointer.loadChild(ctx, pre.store, pre.bitWidth, pre.hash, pre.zeroValue)
+				child, err := pointer.loadChild(ctx, pre.store, pre.bitWidth, pre.hash)
 				if err != nil {
 					return nil, err
 				}
@@ -149,7 +149,7 @@ func diffNode[T HamtValue[T]](ctx context.Context, pre, cur *Node[T], depth int)
 			pointer := cur.getPointer(byte(cur.indexForBitPos(idx)))
 
 			if pointer.isShard() {
-				child, err := pointer.loadChild(ctx, pre.store, pre.bitWidth, pre.hash, pre.zeroValue)
+				child, err := pointer.loadChild(ctx, pre.store, pre.bitWidth, pre.hash)
 				if err != nil {
 					return nil, err
 				}
@@ -174,7 +174,7 @@ func diffNode[T HamtValue[T]](ctx context.Context, pre, cur *Node[T], depth int)
 	return changes, nil
 }
 
-func diffKVs[T HamtValue[T]](pre, cur []*KV[T], idx int) []*Change[T] {
+func diffKVs[T HamtValue[T]](pre, cur []*KV[T], _ int) []*Change[T] {
 	preMap := make(map[string]T, len(pre))
 	curMap := make(map[string]T, len(cur))
 	var changes []*Change[T]
@@ -220,7 +220,7 @@ func diffKVs[T HamtValue[T]](pre, cur []*KV[T], idx int) []*Change[T] {
 	return changes
 }
 
-func addAll[T HamtValue[T]](ctx context.Context, node *Node[T], idx int) ([]*Change[T], error) {
+func addAll[T HamtValue[T]](ctx context.Context, node *Node[T], _ int) ([]*Change[T], error) {
 	var changes []*Change[T]
 	if err := node.ForEach(ctx, func(k string, val T) error {
 		changes = append(changes, &Change[T]{
@@ -237,7 +237,7 @@ func addAll[T HamtValue[T]](ctx context.Context, node *Node[T], idx int) ([]*Cha
 	return changes, nil
 }
 
-func removeAll[T HamtValue[T]](ctx context.Context, node *Node[T], idx int) ([]*Change[T], error) {
+func removeAll[T HamtValue[T]](ctx context.Context, node *Node[T], _ int) ([]*Change[T], error) {
 	var changes []*Change[T]
 	if err := node.ForEach(ctx, func(k string, val T) error {
 		changes = append(changes, &Change[T]{

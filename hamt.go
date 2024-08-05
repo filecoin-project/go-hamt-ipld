@@ -105,8 +105,6 @@ type Node[T HamtValue[T]] struct {
 
 	// for fetching and storing children
 	store cbor.IpldStore
-
-	zeroValue T
 }
 
 // Pointer is an element in a HAMT node's Pointers array, encoded as an IPLD
@@ -199,7 +197,7 @@ func NewNode[T HamtValue[T]](cs cbor.IpldStore, options ...Option) (*Node[T], er
 		}
 	}
 
-	return newNode[T](cs, cfg.hashFn, cfg.bitWidth, zero[T]()), nil
+	return newNode[T](cs, cfg.hashFn, cfg.bitWidth), nil
 }
 
 // Find navigates through the HAMT structure to where key `k` should exist. If
@@ -233,18 +231,17 @@ func (n *Node[T]) Find(ctx context.Context, k string) (T, bool, error) {
 // further nodes.
 func (n *Node[T]) Delete(ctx context.Context, k string) (bool, error) {
 	kb := []byte(k)
-	modified, err := n.modifyValue(ctx, &hashBits{b: n.hash(kb)}, kb, n.zeroValue, OVERWRITE)
+	modified, err := n.modifyValue(ctx, &hashBits{b: n.hash(kb)}, kb, zero[T](), true, OVERWRITE)
 	return modified == MODIFIED, err
 }
 
 // Constructs a new node value.
-func newNode[T HamtValue[T]](cs cbor.IpldStore, hashFn HashFunc, bitWidth int, zeroValue T) *Node[T] {
+func newNode[T HamtValue[T]](cs cbor.IpldStore, hashFn HashFunc, bitWidth int) *Node[T] {
 	nd := &Node[T]{
-		Pointers:  make([]*Pointer[T], 0),
-		bitWidth:  bitWidth,
-		hash:      hashFn,
-		store:     cs,
-		zeroValue: zeroValue,
+		Pointers: make([]*Pointer[T], 0),
+		bitWidth: bitWidth,
+		hash:     hashFn,
+		store:    cs,
 	}
 	return nd
 }
@@ -279,7 +276,7 @@ func (n *Node[T]) getValue(ctx context.Context, hv *hashBits, k string, cb func(
 	if c.isShard() {
 		// if isShard, we have a pointer to a child that we need to load and
 		// delegate our find operation to
-		chnd, err := c.loadChild(ctx, n.store, n.bitWidth, n.hash, n.zeroValue)
+		chnd, err := c.loadChild(ctx, n.store, n.bitWidth, n.hash)
 		if err != nil {
 			return err
 		}
@@ -301,12 +298,12 @@ func (n *Node[T]) getValue(ctx context.Context, hv *hashBits, k string, cb func(
 
 // load a HAMT node from the IpldStore and pass on the (assumed) parameters
 // that are not stored with the node.
-func (p *Pointer[T]) loadChild(ctx context.Context, ns cbor.IpldStore, bitWidth int, hash HashFunc, zeroValue T) (*Node[T], error) {
+func (p *Pointer[T]) loadChild(ctx context.Context, ns cbor.IpldStore, bitWidth int, hash HashFunc) (*Node[T], error) {
 	if p.cache != nil {
 		return p.cache, nil
 	}
 
-	out, err := loadNode[T](ctx, ns, p.Link, false, bitWidth, hash, zeroValue)
+	out, err := loadNode[T](ctx, ns, p.Link, false, bitWidth, hash)
 	if err != nil {
 		return nil, err
 	}
@@ -317,8 +314,8 @@ func (p *Pointer[T]) loadChild(ctx context.Context, ns cbor.IpldStore, bitWidth 
 
 // load a HAMT node from the IpldStore passing on the (assumed) parameters
 // that are not stored with the node and return all KVs of the child and its children.
-func (p *Pointer[T]) loadChildKVs(ctx context.Context, ns cbor.IpldStore, bitWidth int, hash HashFunc, zeroValue T) ([]*KV[T], error) {
-	child, err := p.loadChild(ctx, ns, bitWidth, hash, zeroValue)
+func (p *Pointer[T]) loadChildKVs(ctx context.Context, ns cbor.IpldStore, bitWidth int, hash HashFunc) ([]*KV[T], error) {
+	child, err := p.loadChild(ctx, ns, bitWidth, hash)
 	if err != nil {
 		return nil, err
 	}
@@ -353,7 +350,7 @@ func LoadNode[T HamtValue[T]](ctx context.Context, cs cbor.IpldStore, c cid.Cid,
 			return nil, err
 		}
 	}
-	return loadNode[T](ctx, cs, c, true, cfg.bitWidth, cfg.hashFn, zero[T]())
+	return loadNode[T](ctx, cs, c, true, cfg.bitWidth, cfg.hashFn)
 }
 
 // internal version of loadNode that is aware of whether this is a root node or
@@ -365,7 +362,6 @@ func loadNode[T HamtValue[T]](
 	isRoot bool,
 	bitWidth int,
 	hashFunction HashFunc,
-	zeroValue T,
 ) (*Node[T], error) {
 	var out Node[T]
 	if err := cs.Get(ctx, c, &out); err != nil {
@@ -375,7 +371,6 @@ func loadNode[T HamtValue[T]](
 	out.store = cs
 	out.bitWidth = bitWidth
 	out.hash = hashFunction
-	out.zeroValue = zeroValue
 
 	// Validation
 
@@ -466,7 +461,7 @@ func (n *Node[T]) checkSize(ctx context.Context) (uint64, error) {
 	totsize := uint64(buf.Len())
 	for _, ch := range n.Pointers {
 		if ch.isShard() {
-			chnd, err := ch.loadChild(ctx, n.store, n.bitWidth, n.hash, n.zeroValue)
+			chnd, err := ch.loadChild(ctx, n.store, n.bitWidth, n.hash)
 			if err != nil {
 				return 0, err
 			}
@@ -542,7 +537,7 @@ func (n *Node[T]) Flush(ctx context.Context) error {
 // and save the resulting CID wherever you expect the HAMT root to persist.
 func (n *Node[T]) Set(ctx context.Context, k string, v T) error {
 	keyBytes := []byte(k)
-	_, err := n.modifyValue(ctx, &hashBits{b: n.hash(keyBytes)}, keyBytes, v, OVERWRITE)
+	_, err := n.modifyValue(ctx, &hashBits{b: n.hash(keyBytes)}, keyBytes, v, false, OVERWRITE)
 	return err
 }
 
@@ -551,7 +546,7 @@ func (n *Node[T]) Set(ctx context.Context, k string, v T) error {
 // false otherwise.
 func (n *Node[T]) SetIfAbsent(ctx context.Context, k string, v T) (bool, error) {
 	keyBytes := []byte(k)
-	modified, err := n.modifyValue(ctx, &hashBits{b: n.hash(keyBytes)}, keyBytes, v, NOVERWRITE)
+	modified, err := n.modifyValue(ctx, &hashBits{b: n.hash(keyBytes)}, keyBytes, v, false, NOVERWRITE)
 	return bool(modified), err
 }
 
@@ -635,7 +630,7 @@ func (n *Node[T]) cleanChild(chnd *Node[T], cindex byte) error {
 // cleanNode()). Recursive calls use the same arguments on child nodes but
 // note that `hv.Next()` is not idempotent. Each call will increment the number
 // of bits chomped off the hash digest for this key.
-func (n *Node[T]) modifyValue(ctx context.Context, hv *hashBits, k []byte, v T, replace overwrite) (modified, error) {
+func (n *Node[T]) modifyValue(ctx context.Context, hv *hashBits, k []byte, v T, delete bool, replace overwrite) (modified, error) {
 	idx, err := hv.Next(n.bitWidth)
 	if err != nil {
 		return UNMODIFIED, ErrMaxDepth
@@ -645,7 +640,7 @@ func (n *Node[T]) modifyValue(ctx context.Context, hv *hashBits, k []byte, v T, 
 	// doesn't exist in the HAMT already and can insert it at the appropriate
 	// position.
 	if n.Bitfield.Bit(idx) != 1 {
-		if n.zeroValue.Equals(v) { // Delete absent key
+		if delete { // Delete absent key
 			return UNMODIFIED, nil
 		}
 		return MODIFIED, n.insertKV(idx, k, v)
@@ -665,12 +660,12 @@ func (n *Node[T]) modifyValue(ctx context.Context, hv *hashBits, k []byte, v T, 
 		// it is an eventual Flush passing back over this "cache" node which
 		// causes the updates made to the in-memory "cache" node to eventually
 		// be persisted.
-		chnd, err := child.loadChild(ctx, n.store, n.bitWidth, n.hash, n.zeroValue)
+		chnd, err := child.loadChild(ctx, n.store, n.bitWidth, n.hash)
 		if err != nil {
 			return UNMODIFIED, err
 		}
 
-		modified, err := chnd.modifyValue(ctx, hv, k, v, replace)
+		modified, err := chnd.modifyValue(ctx, hv, k, v, delete, replace)
 		if err != nil {
 			return UNMODIFIED, err
 		}
@@ -685,7 +680,7 @@ func (n *Node[T]) modifyValue(ctx context.Context, hv *hashBits, k []byte, v T, 
 		// current data it contains. This may involve collapsing child nodes if
 		// they no longer contain enough elements to justify their stand-alone
 		// existence.
-		if n.zeroValue.Equals(v) {
+		if delete {
 			if err := n.cleanChild(chnd, cindex); err != nil {
 				return UNMODIFIED, err
 			}
@@ -698,7 +693,7 @@ func (n *Node[T]) modifyValue(ctx context.Context, hv *hashBits, k []byte, v T, 
 	// modified (or deleted) here or needs to be added as a new child node if
 	// there is an overflow.
 
-	if n.zeroValue.Equals(v) {
+	if delete {
 		// delete operation, find the child and remove it, compacting the bucket in
 		// the process
 		for i, p := range child.KVs {
@@ -730,15 +725,15 @@ func (n *Node[T]) modifyValue(ctx context.Context, hv *hashBits, k []byte, v T, 
 	if len(child.KVs) >= bucketSize {
 		// bucket is full, create a child node (shard) with all existing bucket
 		// elements plus the new one and set it in the place of the bucket
-		sub := newNode[T](n.store, n.hash, n.bitWidth, n.zeroValue)
+		sub := newNode[T](n.store, n.hash, n.bitWidth)
 		hvcopy := &hashBits{b: hv.b, consumed: hv.consumed}
-		if _, err := sub.modifyValue(ctx, hvcopy, k, v, replace); err != nil {
+		if _, err := sub.modifyValue(ctx, hvcopy, k, v, delete, replace); err != nil {
 			return UNMODIFIED, err
 		}
 
 		for _, p := range child.KVs {
 			chhv := &hashBits{b: n.hash(p.Key), consumed: hv.consumed}
-			if _, err := sub.modifyValue(ctx, chhv, p.Key, p.Value, replace); err != nil {
+			if _, err := sub.modifyValue(ctx, chhv, p.Key, p.Value, delete, replace); err != nil {
 				return UNMODIFIED, err
 			}
 		}
@@ -811,7 +806,7 @@ func (n *Node[T]) getPointer(i byte) *Pointer[T] {
 // as cached nodes.
 func (n *Node[T]) Copy() *Node[T] {
 	// TODO(rvagg): clarify what situations this method is actually useful for.
-	nn := newNode[T](n.store, n.hash, n.bitWidth, n.zeroValue)
+	nn := newNode[T](n.store, n.hash, n.bitWidth)
 	nn.Bitfield.Set(&n.Bitfield.Int)
 	nn.Pointers = make([]*Pointer[T], len(n.Pointers))
 
@@ -847,7 +842,7 @@ func (p *Pointer[T]) isShard() bool {
 func (n *Node[T]) ForEach(ctx context.Context, f func(k string, val T) error) error {
 	for _, p := range n.Pointers {
 		if p.isShard() {
-			chnd, err := p.loadChild(ctx, n.store, n.bitWidth, n.hash, n.zeroValue)
+			chnd, err := p.loadChild(ctx, n.store, n.bitWidth, n.hash)
 			if err != nil {
 				return err
 			}

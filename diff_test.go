@@ -340,7 +340,7 @@ func TestBigDiff(t *testing.T) {
 	}
 }
 
-func diffAndAssertLength(ctx context.Context, t *testing.T, prevBs, curBs cbor.IpldStore, a, b *Node[*CborByteArray], expectedLength int) []*Change[*CborByteArray] {
+func diffAndAssertLength(ctx context.Context, t *testing.T, _, _ cbor.IpldStore, a, b *Node[*CborByteArray], expectedLength int) []*Change[*CborByteArray] {
 	if err := a.Flush(ctx); err != nil {
 		t.Fatal(err)
 	}

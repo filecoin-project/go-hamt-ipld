@@ -193,11 +193,11 @@ func (s *diffScheduler[T]) work(ctx context.Context, todo *task[T], results chan
 			if prePointer.Link == curPointer.Link {
 				return nil
 			}
-			preChild, err := prePointer.loadChild(ctx, pre.store, pre.bitWidth, pre.hash, pre.zeroValue)
+			preChild, err := prePointer.loadChild(ctx, pre.store, pre.bitWidth, pre.hash)
 			if err != nil {
 				return err
 			}
-			curChild, err := curPointer.loadChild(ctx, cur.store, cur.bitWidth, cur.hash, pre.zeroValue)
+			curChild, err := curPointer.loadChild(ctx, cur.store, cur.bitWidth, cur.hash)
 			if err != nil {
 				return err
 			}
@@ -220,7 +220,7 @@ func (s *diffScheduler[T]) work(ctx context.Context, todo *task[T], results chan
 
 		// check if KV's from cur exists in any children of pre's child.
 		case prePointer.isShard() && !curPointer.isShard():
-			childKV, err := prePointer.loadChildKVs(ctx, pre.store, pre.bitWidth, pre.hash, pre.zeroValue)
+			childKV, err := prePointer.loadChildKVs(ctx, pre.store, pre.bitWidth, pre.hash)
 			if err != nil {
 				return err
 			}
@@ -228,7 +228,7 @@ func (s *diffScheduler[T]) work(ctx context.Context, todo *task[T], results chan
 
 		// check if KV's from pre exists in any children of cur's child.
 		case !prePointer.isShard() && curPointer.isShard():
-			childKV, err := curPointer.loadChildKVs(ctx, cur.store, cur.bitWidth, cur.hash, pre.zeroValue)
+			childKV, err := curPointer.loadChildKVs(ctx, cur.store, cur.bitWidth, cur.hash)
 			if err != nil {
 				return err
 			}
@@ -243,7 +243,7 @@ func (s *diffScheduler[T]) work(ctx context.Context, todo *task[T], results chan
 		pointer := pre.getPointer(byte(pre.indexForBitPos(idx)))
 
 		if pointer.isShard() {
-			child, err := pointer.loadChild(ctx, pre.store, pre.bitWidth, pre.hash, pre.zeroValue)
+			child, err := pointer.loadChild(ctx, pre.store, pre.bitWidth, pre.hash)
 			if err != nil {
 				return err
 			}
@@ -266,7 +266,7 @@ func (s *diffScheduler[T]) work(ctx context.Context, todo *task[T], results chan
 		pointer := cur.getPointer(byte(cur.indexForBitPos(idx)))
 
 		if pointer.isShard() {
-			child, err := pointer.loadChild(ctx, pre.store, pre.bitWidth, pre.hash, pre.zeroValue)
+			child, err := pointer.loadChild(ctx, pre.store, pre.bitWidth, pre.hash)
 			if err != nil {
 				return err
 			}

@@ -441,7 +441,7 @@ func printHamt(hamt *Node[*CborByteArray]) {
 		fmt.Printf("%s‣ %v:\n", strings.Repeat("  ", depth), c)
 		for _, p := range n.Pointers {
 			if p.isShard() {
-				child, err := p.loadChild(ctx, n.store, n.bitWidth, n.hash, n.zeroValue)
+				child, err := p.loadChild(ctx, n.store, n.bitWidth, n.hash)
 				if err != nil {
 					panic(err)
 				}
@@ -503,7 +503,7 @@ func statsrec(n *Node[*CborByteArray], st *hamtStats) {
 	st.totalNodes++
 	for _, p := range n.Pointers {
 		if p.isShard() {
-			nd, err := p.loadChild(context.Background(), n.store, n.bitWidth, n.hash, n.zeroValue)
+			nd, err := p.loadChild(context.Background(), n.store, n.bitWidth, n.hash)
 			if err != nil {
 				panic(err)
 			}
