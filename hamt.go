@@ -31,6 +31,9 @@ const (
 	UNMODIFIED = modified(false)
 )
 
+// HamtValue is an interface that must be implemented by the values stored in
+// the HAMT. It is used to create new instances of the value type, to
+// compare values for equality and to handle serialization.
 type HamtValue[V any] interface {
 	New() V
 	Equals(V) bool
