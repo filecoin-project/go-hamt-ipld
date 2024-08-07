@@ -11,7 +11,7 @@ import (
 // implemented as a kinded union - a "Pointer" is either a Link (child node) or
 // an Array (bucket)
 
-func (t *Pointer) MarshalCBOR(w io.Writer) error {
+func (t *Pointer[T]) MarshalCBOR(w io.Writer) error {
 	if t.Link != cid.Undef && len(t.KVs) > 0 {
 		return fmt.Errorf("hamt Pointer cannot have both a link and KVs")
 	}
@@ -37,7 +37,7 @@ func (t *Pointer) MarshalCBOR(w io.Writer) error {
 	return nil
 }
 
-func (t *Pointer) UnmarshalCBOR(r io.Reader) error {
+func (t *Pointer[T]) UnmarshalCBOR(r io.Reader) error {
 	cr := cbg.NewCborReader(r)
 
 	maj, extra, err := cr.ReadHeader()
@@ -69,9 +69,9 @@ func (t *Pointer) UnmarshalCBOR(r io.Reader) error {
 			return fmt.Errorf("KV array in CBOR input for pointer was too long")
 		}
 
-		t.KVs = make([]*KV, length)
+		t.KVs = make([]*KV[T], length)
 		for i := 0; i < int(length); i++ {
-			var kv KV
+			var kv KV[T]
 			if err := kv.UnmarshalCBOR(cr); err != nil {
 				return err
 			}

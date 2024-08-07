@@ -1,4 +1,4 @@
-module github.com/filecoin-project/go-hamt-ipld/v3
+module github.com/filecoin-project/go-hamt-ipld/v4
 
 require (
 	github.com/ipfs/go-block-format v0.2.0
@@ -34,3 +34,5 @@ require (
 )
 
 go 1.21
+
+replace github.com/whyrusleeping/cbor-gen => github.com/rvagg/cbor-gen v0.0.0-20240807070044-d0902e2dd8b1
