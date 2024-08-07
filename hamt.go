@@ -35,7 +35,7 @@ const (
 // the HAMT. It is used to create new instances of the value type, to
 // compare values for equality and to handle serialization.
 type HamtValue[V any] interface {
-	cbg.CBORSerializer[V]
+	cbg.CBORGenericType[V]
 	Equals(V) bool
 }
 
@@ -452,7 +452,7 @@ func (n *Node[T]) checkSize(ctx context.Context) (uint64, error) {
 	}
 
 	buf := new(bytes.Buffer)
-	if err := v.MarshalCBOR(buf); err != nil {
+	if err := v.ToCBOR(buf); err != nil {
 		return 0, err
 	}
 	totsize := uint64(buf.Len())

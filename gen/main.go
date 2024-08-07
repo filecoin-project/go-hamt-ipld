@@ -18,7 +18,6 @@ func main() {
 // dummy generic type that cbor-gen will replace with T
 type dummy int64
 
-func (d dummy) New() dummy                    { return dummy(0) }
-func (d dummy) Equals(dummy) bool             { return false }
-func (d dummy) MarshalCBOR(io.Writer) error   { return nil }
-func (d dummy) UnmarshalCBOR(io.Reader) error { return nil }
+func (d dummy) Equals(dummy) bool                 { return false }
+func (d dummy) ToCBOR(io.Writer) error            { return nil }
+func (d dummy) FromCBOR(io.Reader) (dummy, error) { return dummy(0), nil }

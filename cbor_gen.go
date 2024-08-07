@@ -160,7 +160,7 @@ func (t *KV[T]) MarshalCBOR(w io.Writer) error {
 	}
 
 	// t.Value (T)
-	if err := t.Value.MarshalCBOR(cw); err != nil {
+	if err := t.Value.ToCBOR(cw); err != nil {
 		return err
 	}
 
@@ -214,8 +214,8 @@ func (t *KV[T]) UnmarshalCBOR(r io.Reader) (err error) {
 	// t.Value (T)
 	{
 		var value T
-		value = value.New()
-		if err := value.UnmarshalCBOR(cr); err != nil {
+		var err error
+		if value, err = value.FromCBOR(cr); err != nil {
 			return xerrors.Errorf("failed to read field: %w", err)
 		}
 		t.Value = value

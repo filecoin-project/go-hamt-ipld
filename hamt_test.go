@@ -849,20 +849,18 @@ func TestCopyWithoutFlush(t *testing.T) {
 	cs := cbor.NewCborStore(newMockBlocks())
 
 	count := 200
-	n, err := NewNode[*CborInt](cs)
+	n, err := NewNode[CborInt](cs)
 	require.NoError(t, err)
 
 	for i := 0; i < count; i++ {
-		v := CborInt(i)
-		err := n.Set(ctx, fmt.Sprintf("key%d", i), &v)
+		err := n.Set(ctx, fmt.Sprintf("key%d", i), CborInt(i))
 		require.NoError(t, err)
 	}
 
 	require.NoError(t, n.Flush(ctx))
 
 	for i := 0; i < count; i++ {
-		v := CborInt(count + i)
-		err := n.Set(ctx, fmt.Sprintf("key%d", i), &v)
+		err := n.Set(ctx, fmt.Sprintf("key%d", i), CborInt(count+i))
 		require.NoError(t, err)
 	}
 
@@ -1220,8 +1218,7 @@ func TestCleanChildOrdering(t *testing.T) {
 		n := binary.PutUvarint(buf, i)
 		return string(buf[:n])
 	}
-	ci := CborInt(42)
-	dummyValue := &ci
+	dummyValue := CborInt(42)
 
 	ctx := context.Background()
 	cs := cbor.NewCborStore(newMockBlocks())
@@ -1233,7 +1230,7 @@ func TestCleanChildOrdering(t *testing.T) {
 		}),
 	}
 
-	h, err := NewNode[*CborInt](cs, hamtOptions...)
+	h, err := NewNode[CborInt](cs, hamtOptions...)
 	require.NoError(t, err)
 
 	for i := uint64(100); i < uint64(195); i++ {
@@ -1245,7 +1242,7 @@ func TestCleanChildOrdering(t *testing.T) {
 	require.NoError(t, h.Flush(ctx))
 	root, err := cs.Put(ctx, h)
 	require.NoError(t, err)
-	h, err = LoadNode[*CborInt](ctx, cs, root, hamtOptions...)
+	h, err = LoadNode[CborInt](ctx, cs, root, hamtOptions...)
 	require.NoError(t, err)
 
 	// Delete key 104 so child indexed at 20 has four pointers
@@ -1261,7 +1258,7 @@ func TestCleanChildOrdering(t *testing.T) {
 	require.NoError(t, err)
 
 	// Reload without error
-	_, err = LoadNode[*CborInt](ctx, cs, root, hamtOptions...)
+	_, err = LoadNode[CborInt](ctx, cs, root, hamtOptions...)
 	assert.NoError(t, err)
 }
 
@@ -1271,8 +1268,7 @@ func TestPutOrderIndependent(t *testing.T) {
 		n := binary.PutUvarint(buf, i)
 		return string(buf[:n])
 	}
-	ci := CborInt(42)
-	dummyValue := &ci
+	dummyValue := CborInt(42)
 
 	ctx := context.Background()
 	cs := cbor.NewCborStore(newMockBlocks())
@@ -1284,7 +1280,7 @@ func TestPutOrderIndependent(t *testing.T) {
 		}),
 	}
 
-	h, err := NewNode[*CborInt](cs, hamtOptions...)
+	h, err := NewNode[CborInt](cs, hamtOptions...)
 	require.NoError(t, err)
 
 	nKeys := 32 * 32 * 2
@@ -1305,12 +1301,11 @@ func TestPutOrderIndependent(t *testing.T) {
 		vals[i] = rand.Intn(nKeys)
 	}
 
-	ci2 := CborInt(43)
-	newDummyValue := &ci2
+	newDummyValue := CborInt(43)
 
 	res := map[cid.Cid]struct{}{}
 	for i := 0; i < 20; i++ {
-		h, err = LoadNode[*CborInt](ctx, cs, c, hamtOptions...)
+		h, err = LoadNode[CborInt](ctx, cs, c, hamtOptions...)
 		require.NoError(t, err)
 		rand.Shuffle(len(vals), func(i, j int) {
 			vals[i], vals[j] = vals[j], vals[i]
@@ -1335,8 +1330,7 @@ func TestDeleteOrderIndependent(t *testing.T) {
 		n := binary.PutUvarint(buf, i)
 		return string(buf[:n])
 	}
-	ci := CborInt(42)
-	dummyValue := &ci
+	dummyValue := CborInt(42)
 
 	ctx := context.Background()
 	cs := cbor.NewCborStore(newMockBlocks())
@@ -1348,7 +1342,7 @@ func TestDeleteOrderIndependent(t *testing.T) {
 		}),
 	}
 
-	h, err := NewNode[*CborInt](cs, hamtOptions...)
+	h, err := NewNode[CborInt](cs, hamtOptions...)
 	require.NoError(t, err)
 
 	nKeys := 32 * 32 * 2
@@ -1371,7 +1365,7 @@ func TestDeleteOrderIndependent(t *testing.T) {
 
 	res := map[cid.Cid]struct{}{}
 	for i := 0; i < 20; i++ {
-		h, err = LoadNode[*CborInt](ctx, cs, c, hamtOptions...)
+		h, err = LoadNode[CborInt](ctx, cs, c, hamtOptions...)
 		require.NoError(t, err)
 		rand.Shuffle(len(vals), func(i, j int) {
 			vals[i], vals[j] = vals[j], vals[i]
