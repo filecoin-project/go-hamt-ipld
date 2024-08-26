@@ -32,4 +32,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.0 // indirect
 )
 
-go 1.21
+go 1.22
