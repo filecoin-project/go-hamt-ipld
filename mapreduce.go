@@ -148,9 +148,11 @@ func (cmr *CachedMapReduce[T, PT, U]) mapReduceInternal(ctx context.Context, nod
 			Us = append(Us, linkU.value)
 			weight += linkU.weight
 		} else {
+			reader := bytes.NewReader(nil)
 			for _, v := range p.KVs {
 				var pt = PT(new(T))
-				err := pt.UnmarshalCBOR(bytes.NewReader(v.Value.Raw))
+				reader.Reset(v.Value.Raw)
+				err := pt.UnmarshalCBOR(reader)
 				if err != nil {
 					return res, fmt.Errorf("failed to unmarshal value: %w", err)
 				}
