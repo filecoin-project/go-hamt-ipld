@@ -9,7 +9,9 @@ import (
 	"sync"
 
 	cid "github.com/ipfs/go-cid"
+	cbor "github.com/ipfs/go-ipld-cbor"
 	cbg "github.com/whyrusleeping/cbor-gen"
+	xerrors "golang.org/x/xerrors"
 )
 
 type cacheEntry[T any] struct {
@@ -107,11 +109,13 @@ func NewCachedMapReduce[T any, PT interface {
 }
 
 // MapReduce applies the map reduce function to the given root node.
-func (cmr *CachedMapReduce[T, PT, U]) MapReduce(ctx context.Context, root *Node) (U, error) {
+func (cmr *CachedMapReduce[T, PT, U]) MapReduce(ctx context.Context, cs cbor.IpldStore, c cid.Cid, options ...Option) (U, error) {
 	var res U
-	if root == nil {
-		return res, errors.New("root is nil")
+	root, err := LoadNode(ctx, cs, c, options...)
+	if err != nil {
+		return res, xerrors.Errorf("failed to load root node: %w", err)
 	}
+
 	ce, err := cmr.mapReduceInternal(ctx, root)
 	if err != nil {
 		return res, err

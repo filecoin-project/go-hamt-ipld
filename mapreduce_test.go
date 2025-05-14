@@ -25,26 +25,24 @@ func TestMapReduceSimple(t *testing.T) {
 	ctx := context.Background()
 	opts := []Option{UseTreeBitWidth(5)}
 	cs := &readCounterStore{cbor.NewCborStore(newMockBlocks()), 0}
-	begn, err := NewNode(cs, opts...)
-	require.NoError(t, err)
 
-	golden := make(map[string]string)
 	N := 50000
-	for range N {
-		k := randKey()
-		v := randValue()
-		golden[k] = string([]byte(*v))
-		begn.Set(ctx, k, v)
-	}
+	var rootCid cid.Cid
+	golden := make(map[string]string)
+	{
+		begn, err := NewNode(cs, opts...)
+		require.NoError(t, err)
 
-	reLoadNode := func(node *Node) *Node {
-		c, err := node.Write(ctx)
+		for range N {
+			k := randKey()
+			v := randValue()
+			golden[k] = string([]byte(*v))
+			begn.Set(ctx, k, v)
+		}
+
+		rootCid, err = begn.Write(ctx)
 		require.NoError(t, err)
-		res, err := LoadNode(ctx, cs, c, opts...)
-		require.NoError(t, err)
-		return res
 	}
-	begn = reLoadNode(begn)
 
 	type kv struct {
 		k string
@@ -70,14 +68,13 @@ func TestMapReduceSimple(t *testing.T) {
 	require.NoError(t, err)
 
 	cs.readCount = 0
-	res, err := cmr.MapReduce(ctx, begn)
+	res, err := cmr.MapReduce(ctx, cs, rootCid, opts...)
 	require.NoError(t, err)
 	require.Equal(t, len(golden), len(res))
 	t.Logf("fresh readCount: %d", cs.readCount)
 
-	begn = reLoadNode(begn)
 	cs.readCount = 0
-	res, err = cmr.MapReduce(ctx, begn)
+	res, err = cmr.MapReduce(ctx, cs, rootCid, opts...)
 	require.NoError(t, err)
 	t.Logf("fresh re-readCount: %d", cs.readCount)
 	require.Less(t, cs.readCount, 200)
@@ -94,39 +91,42 @@ func TestMapReduceSimple(t *testing.T) {
 	verifyConsistency(res)
 
 	{
+		begn, err := LoadNode(ctx, cs, rootCid, opts...)
+		require.NoError(t, err)
 		// add new key
 		k := randKey()
 		v := randValue()
 		golden[k] = string([]byte(*v))
 		begn.Set(ctx, k, v)
 
-		begn = reLoadNode(begn)
+		rootCid, err = begn.Write(ctx)
+		require.NoError(t, err)
 	}
 
 	cs.readCount = 0
-	res, err = cmr.MapReduce(ctx, begn)
+	res, err = cmr.MapReduce(ctx, cs, rootCid, opts...)
 	require.NoError(t, err)
 	verifyConsistency(res)
 	t.Logf("new key readCount: %d", cs.readCount)
 	require.Less(t, cs.readCount, 200)
 
-	begn = reLoadNode(begn)
 	cs.readCount = 0
-	res, err = cmr.MapReduce(ctx, begn)
+	res, err = cmr.MapReduce(ctx, cs, rootCid, opts...)
 	require.NoError(t, err)
 	verifyConsistency(res)
 	t.Logf("repeat readCount: %d", cs.readCount)
 	require.Less(t, cs.readCount, 200)
 
-	begn = reLoadNode(begn)
 	cs.readCount = 0
-	res, err = cmr.MapReduce(ctx, begn)
+	res, err = cmr.MapReduce(ctx, cs, rootCid, opts...)
 	require.NoError(t, err)
 	verifyConsistency(res)
 	t.Logf("repeat readCount: %d", cs.readCount)
 	require.Less(t, cs.readCount, 200)
 
 	{
+		begn, err := LoadNode(ctx, cs, rootCid, opts...)
+		require.NoError(t, err)
 		// add two new keys
 		k := randKey()
 		v := randValue()
@@ -137,11 +137,12 @@ func TestMapReduceSimple(t *testing.T) {
 		golden[k] = string([]byte(*v))
 		begn.Set(ctx, k, v)
 
-		begn = reLoadNode(begn)
+		rootCid, err = begn.Write(ctx)
+		require.NoError(t, err)
 	}
 
 	cs.readCount = 0
-	res, err = cmr.MapReduce(ctx, begn)
+	res, err = cmr.MapReduce(ctx, cs, rootCid, opts...)
 	require.NoError(t, err)
 	verifyConsistency(res)
 	t.Logf("new two keys readCount: %d", cs.readCount)
