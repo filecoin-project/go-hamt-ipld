@@ -8,7 +8,7 @@ import (
 	"math/rand/v2"
 	"sync"
 
-	cid "github.com/ipfs/go-cid"
+	"github.com/ipfs/go-cid"
 	cbor "github.com/ipfs/go-ipld-cbor"
 	cbg "github.com/whyrusleeping/cbor-gen"
 	xerrors "golang.org/x/xerrors"
@@ -18,6 +18,7 @@ type cacheEntry[T any] struct {
 	value  T
 	weight int
 }
+
 type weigthted2RCache[T any] struct {
 	lk        sync.Mutex
 	cache     map[cid.Cid]cacheEntry[T]
@@ -30,6 +31,7 @@ func newWeighted2RCache[T any](cacheSize int) *weigthted2RCache[T] {
 		cacheSize: cacheSize,
 	}
 }
+
 func (c *weigthted2RCache[T]) Get(k cid.Cid) (cacheEntry[T], bool) {
 	c.lk.Lock()
 	defer c.lk.Unlock()
@@ -54,8 +56,8 @@ func (c *weigthted2RCache[T]) Add(k cid.Cid, v cacheEntry[T]) {
 
 	c.cache[k] = v
 	if len(c.cache) > c.cacheSize {
-		// pick two random entris using map iteration
-		// work well for cacheSize > 8
+		// pick two random entries using map iteration
+		// this works well for cacheSize > 8
 		var k1, k2 cid.Cid
 		var v1, v2 cacheEntry[T]
 		for k, v := range c.cache {
