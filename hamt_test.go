@@ -531,6 +531,35 @@ func TestSha256(t *testing.T) {
 	}))
 }
 
+func TestForEach(t *testing.T) {
+	ctx := context.Background()
+	cs := cbor.NewCborStore(newMockBlocks())
+	begn, err := NewNode(cs)
+	require.NoError(t, err)
+
+	golden := make(map[string]*CborByteArray)
+	for range 1000 {
+		k := randKey()
+		v := randValue()
+		golden[k] = v
+		err = begn.Set(ctx, k, v)
+		require.NoError(t, err)
+	}
+	err = begn.Flush(ctx)
+	require.NoError(t, err)
+	err = begn.ForEach(ctx, func(k string, val *cbg.Deferred) error {
+		v, ok := golden[k]
+		if !ok {
+			t.Fatalf("unexpected key in ForEach: %s", k)
+		}
+		var val2 CborByteArray
+		val2.UnmarshalCBOR(bytes.NewReader(val.Raw))
+		require.Equal(t, []byte(*v), []byte(val2))
+		return nil
+	})
+	require.NoError(t, err)
+}
+
 func testBasic(t *testing.T, options ...Option) {
 	ctx := context.Background()
 	cs := cbor.NewCborStore(newMockBlocks())
