@@ -2,6 +2,8 @@ package hamt
 
 import (
 	"context"
+	"encoding/hex"
+	"math/rand/v2"
 	"slices"
 	"strings"
 	"testing"
@@ -21,10 +23,24 @@ func (rcs *readCounterStore) Get(ctx context.Context, c cid.Cid, out any) error 
 	return rcs.IpldStore.Get(ctx, c, out)
 }
 
+type deterministicKVGen struct {
+	rng *rand.ChaCha8
+}
+
+func (dkg *deterministicKVGen) GenKV() (string, *CborByteArray) {
+	key := make([]byte, 18)
+	dkg.rng.Read(key)
+	val := CborByteArray(make([]byte, 30))
+	dkg.rng.Read(val)
+	return hex.EncodeToString(key), &val
+}
+
 func TestMapReduceSimple(t *testing.T) {
 	ctx := context.Background()
 	opts := []Option{UseTreeBitWidth(5)}
 	cs := &readCounterStore{cbor.NewCborStore(newMockBlocks()), 0}
+
+	gen := deterministicKVGen{rng: rand.NewChaCha8([32]byte{})}
 
 	N := 50000
 	var rootCid cid.Cid
@@ -34,8 +50,7 @@ func TestMapReduceSimple(t *testing.T) {
 		require.NoError(t, err)
 
 		for range N {
-			k := randKey()
-			v := randValue()
+			k, v := gen.GenKV()
 			golden[k] = string([]byte(*v))
 			begn.Set(ctx, k, v)
 		}
@@ -63,7 +78,7 @@ func TestMapReduceSimple(t *testing.T) {
 		return kvsConcat, nil
 	}
 
-	cmr, err := NewCachedMapReduce(mapper, reducer, 200)
+	cmr, err := NewCachedMapReduce(mapper, reducer, int(N/300))
 	t.Logf("tree size: %d, cache size: %d", N, cmr.cache.cacheSize)
 	require.NoError(t, err)
 
@@ -94,8 +109,7 @@ func TestMapReduceSimple(t *testing.T) {
 		begn, err := LoadNode(ctx, cs, rootCid, opts...)
 		require.NoError(t, err)
 		// add new key
-		k := randKey()
-		v := randValue()
+		k, v := gen.GenKV()
 		golden[k] = string([]byte(*v))
 		begn.Set(ctx, k, v)
 
@@ -128,12 +142,10 @@ func TestMapReduceSimple(t *testing.T) {
 		begn, err := LoadNode(ctx, cs, rootCid, opts...)
 		require.NoError(t, err)
 		// add two new keys
-		k := randKey()
-		v := randValue()
+		k, v := gen.GenKV()
 		golden[k] = string([]byte(*v))
 		begn.Set(ctx, k, v)
-		k = randKey()
-		v = randValue()
+		k, v = gen.GenKV()
 		golden[k] = string([]byte(*v))
 		begn.Set(ctx, k, v)
 
