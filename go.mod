@@ -7,7 +7,7 @@ require (
 	github.com/ipfs/go-cid v0.5.0
 	github.com/ipfs/go-ipld-cbor v0.2.1
 	github.com/spaolacci/murmur3 v1.1.0
-	github.com/stretchr/testify v1.10.0
+	github.com/stretchr/testify v1.11.0
 	github.com/whyrusleeping/cbor-gen v0.3.1
 	golang.org/x/sync v0.16.0
 	golang.org/x/sys v0.33.0 // indirect
