@@ -1,6 +1,6 @@
 module github.com/filecoin-project/go-hamt-ipld/v3
 
-go 1.25
+go 1.25.0
 
 require (
 	github.com/ipfs/go-block-format v0.2.3
@@ -9,7 +9,7 @@ require (
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/stretchr/testify v1.11.1
 	github.com/whyrusleeping/cbor-gen v0.3.1
-	golang.org/x/sync v0.19.0
+	golang.org/x/sync v0.20.0
 	golang.org/x/sys v0.38.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da
 	gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127 // indirect
